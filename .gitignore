@@ -65,3 +65,8 @@ Icon
 Network Trash Folder
 Temporary Items
 .apdisk
+
+
+# Local Files
+play/tests/*
+play/test-results/*
