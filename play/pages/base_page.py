@@ -3,7 +3,6 @@ Page object model for the API Base Page.
 Encapsulates all the interactions we will do with the base page
 """
 
-from ast import Call
 import time
 from playwright.sync_api import Page, Locator, BrowserContext
 from typing import Optional, Callable, Union
