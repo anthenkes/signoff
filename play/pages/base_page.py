@@ -155,3 +155,15 @@ class BasePage:
         locator.wait_for(state=state, timeout=timeout)
         return locator
 
+    def wait_for_idle(self, timeout: int = 1000) -> None:
+        """
+        Wait a short moment for any immediate actions to complete.
+        
+        This is a simple timeout to allow any immediate UI updates or
+        navigation to start after an action. Does not wait for network idle.
+        
+        Args:
+            timeout: Time to wait in milliseconds (default: 1000)
+        """
+        self.page.wait_for_timeout(timeout)
+
