@@ -13,9 +13,29 @@ if TYPE_CHECKING:
     from models import SignOffResult, User
 
 
+class ColoredFormatter(logging.Formatter):
+    """Custom formatter that adds colors to log levels."""
+    COLORS = {
+        "DEBUG": "\033[94m",      # Blue
+        "INFO": "\033[92m",       # Green
+        "WARNING": "\033[93m",    # Yellow
+        "ERROR": "\033[91m",      # Red
+        "CRITICAL": "\033[91m",   # Red
+        "RESET": "\033[0m",       # Reset to default color
+    }
+
+    def format(self, record):
+        log_message = super().format(record)
+        # Only add colors to console output, not file output
+        if hasattr(record, 'no_color') and record.no_color:
+            return log_message
+        color = self.COLORS.get(record.levelname, self.COLORS["RESET"])
+        return f"{color}{log_message}{self.COLORS['RESET']}"
+
+
 def setup_logging(verbose: bool = False, log_file: Optional[str] = None) -> None:
     """
-    Set up logging configuration.
+    Set up logging configuration with colored output.
     
     Args:
         verbose: If True, set log level to DEBUG
@@ -27,12 +47,26 @@ def setup_logging(verbose: bool = False, log_file: Optional[str] = None) -> None
     if log_file:
         log_path = Path(log_file)
         log_path.parent.mkdir(exist_ok=True)
-        handlers = [
-            logging.FileHandler(log_file),
-            logging.StreamHandler(sys.stdout)
-        ]
+        file_handler = logging.FileHandler(log_file)
+        file_formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        file_handler.setFormatter(file_formatter)
+        
+        stream_handler = logging.StreamHandler(sys.stdout)
+        colored_formatter = ColoredFormatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        stream_handler.setFormatter(colored_formatter)
+        
+        handlers = [file_handler, stream_handler]
     else:
-        handlers = [logging.StreamHandler(sys.stdout)]
+        stream_handler = logging.StreamHandler(sys.stdout)
+        colored_formatter = ColoredFormatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        stream_handler.setFormatter(colored_formatter)
+        handlers = [stream_handler]
     
     logging.basicConfig(
         level=log_level,
