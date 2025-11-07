@@ -70,3 +70,7 @@ Temporary Items
 # Local Files
 play/tests/*
 play/test-results/*
+play/users.*
+play/env.*
+screenshots/
+test-results/
