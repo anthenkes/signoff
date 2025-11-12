@@ -68,9 +68,7 @@ Temporary Items
 
 
 # Local Files
-play/tests/*
-play/test-results/*
-play/users.*
-play/env.*
+src/users.*
+src/env.*
 screenshots/
 test-results/
