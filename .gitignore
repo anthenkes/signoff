@@ -72,3 +72,10 @@ src/users.*
 src/env.*
 screenshots/
 test-results/
+
+# Next.js
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+frontend/.env.local
+frontend/.env*.local
