@@ -37,6 +37,7 @@ def get_email_config() -> Dict[str, Any]:
     return {
         "api_key": api_key,
         "from_email": from_email,
-        "from_name": os.getenv("RESEND_FROM_NAME", "Time Card Automation")
+        "from_name": os.getenv("RESEND_FROM_NAME", "Time Card Automation"),
+        "admin_email": os.getenv("ADMIN_EMAIL")  # Optional: admin email for alerts
     }
 
