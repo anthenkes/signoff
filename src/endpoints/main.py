@@ -175,6 +175,8 @@ class CredentialsResponse(BaseModel):
 
 
 # Internal endpoint to generate magic link
+# TODO: Will make this Railway Console CLI script in the future to create a magic link for a user.
+# Also need to make sure that the toke is hashed and not storing the raw token in the db
 @app.post("/api/magic-link", response_model=MagicLinkResponse)
 async def create_magic_link(
     request: MagicLinkRequest,
