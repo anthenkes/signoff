@@ -10,7 +10,7 @@ from functools import wraps
 import time
 
 if TYPE_CHECKING:
-    from models import SignOffResult, User
+    from signoff_models import SignoffResult, SignoffUser
 
 
 class ColoredFormatter(logging.Formatter):
@@ -149,12 +149,12 @@ def retry(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0):
     return decorator
 
 
-def format_result_message(result: "SignOffResult") -> str:
+def format_result_message(result: "SignoffResult") -> str:
     """
     Format a sign-off result into a readable message.
     
     Args:
-        result: The SignOffResult object
+        result: The SignoffResult object
     
     Returns:
         Formatted message string
