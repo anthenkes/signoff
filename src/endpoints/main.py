@@ -1,10 +1,11 @@
 """
 FastAPI application main file.
 """
-from fastapi import FastAPI, Request, HTTPException, Depends, status, Query
-from fastapi.responses import JSONResponse, RedirectResponse
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request, HTTPException, Depends, status, Query, Form
+from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
+from starlette.templating import Jinja2Templates
 from fastapi.security import HTTPHeader
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -14,11 +15,15 @@ import logging
 import secrets
 import traceback
 from datetime import datetime, timedelta, timezone
-
+import hashlib
+from playwright.sync_api import sync_playwright
 from .config import get_api_config
-from db.database import init_db, get_db, Base, get_engine
-from db.models import MagicLink, User, Credential
+from config import get_app_config
+from db.database import init_db, get_db, get_engine
+from db.models import MagicLink, User, Credential, Base
 from kms.service import KMSEncryptService
+from play.pages.login_page import LoginPage
+from play.pages.dashboard_page import DashboardPage
 from auth.cookies import (
     create_credentials_cookie, 
     verify_credentials_cookie, 
@@ -31,6 +36,60 @@ logger = logging.getLogger(__name__)
 
 # Get API configuration
 api_config = get_api_config()
+
+# Initialize Jinja2 templates
+templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
+
+
+async def validate_timecard_login(username: str, password: str) -> tuple[bool, str]:
+    """
+    Attempt a real login against the timecard portal to validate credentials.
+    
+    Returns:
+        Tuple of (is_valid, error_message). error_message is empty on success.
+    """
+    app_config = get_app_config()
+    base_url = app_config.get("base_url")
+    domain = app_config.get("default_domain", "MC Network")
+    headless = app_config.get("headless", True)
+    slow_mo = app_config.get("slow_mo", 0)
+    timeout = app_config.get("default_timeout", 30000)
+
+    def _attempt_login() -> tuple[bool, str]:
+        context = None
+        browser = None
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=headless, slow_mo=slow_mo)
+                context = browser.new_context()
+                page = context.new_page()
+                page.set_default_timeout(timeout)
+
+                login_page = LoginPage(page)
+                login_page.goto(base_url)
+                login_page.wait_for_page_load()
+                login_page.login(username, password, domain)
+
+                dashboard_page = DashboardPage(page)
+                dashboard_page.wait_for_dashboard_load()
+                return True, ""
+        except Exception as e:
+            logger.warning(f"Credential validation failed during portal login: {e}")
+            return False, "Invalid username or password. Please double-check and try again."
+        finally:
+            try:
+                if context:
+                    context.close()
+                if browser:
+                    browser.close()
+            except Exception:
+                pass
+
+    try:
+        return await run_in_threadpool(_attempt_login)
+    except Exception as e:
+        logger.error(f"Error validating credentials with timecard portal: {e}", exc_info=True)
+        return False, "Unable to validate credentials right now. Please try again."
 
 
 @asynccontextmanager
@@ -53,32 +112,23 @@ async def lifespan(app: FastAPI):
 
 
 # Create FastAPI app with lifespan
-app = FastAPI(
-    title=api_config["title"],
-    description=api_config["description"],
-    version=api_config["version"],
-    lifespan=lifespan,
-)
-
-# CORS middleware - allow frontend origins
-frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-allowed_origins = [
-    frontend_url,
-    "http://localhost:3000",  # Default Next.js dev server
-    "http://127.0.0.1:3000",
-]
-
-# Allow all origins in development if FRONTEND_URL is not set
-if os.getenv("ENVIRONMENT", "development") == "development":
-    allowed_origins.append("*")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+if os.getenv("ENVIRONMENT", "development") == "production":
+    app = FastAPI(
+        title=api_config["title"],
+        description=api_config["description"],
+        version=api_config["version"],
+        lifespan=lifespan,
+        docs_url=None, # Disable docs in production
+        redoc_url=None, # Disable redoc in production
+        openapi_url=None, # Disable openapi in production
+    )
+else:
+    app = FastAPI(
+        title=api_config["title"],
+        description=api_config["description"],
+        version=api_config["version"],
+        lifespan=lifespan,
+    )
 
 # Internal route protection
 def get_internal_secret() -> Optional[str]:
@@ -189,13 +239,16 @@ async def create_magic_link(
     try:
         # Generate a secure token
         token = secrets.token_urlsafe(32)
-        
+
+        # Hash the token
+        hashed_token = hashlib.sha256(token.encode()).hexdigest()
+
         # Set expiration to 24 hours from now
         expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
         
         # Create magic link record
         magic_link = MagicLink(
-            token=token,
+            token=hashed_token,
             email=request.email,
             expires_at=expires_at,
             used=False
@@ -205,9 +258,9 @@ async def create_magic_link(
         db.commit()
         db.refresh(magic_link)
         
-        # Get base URL from request or environment (frontend URL)
-        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-        link = f"{frontend_url}/credentials?token={token}"
+        # Get base URL from environment (backend URL for API endpoint)
+        backend_url = os.getenv("BACKEND_URL", os.getenv("API_URL", "http://localhost:8000"))
+        link = f"{backend_url}/api/validate-magic-link?token={token}"
         
         logger.info(f"Magic link created: email={request.email}, expires_at={expires_at}")
         
@@ -285,8 +338,11 @@ async def validate_magic_link(
     Public API endpoint to validate a magic link token.
     Sets a cookie and redirects to credentials form if valid.
     """
+    # Hase incoming token
+    hashed_token = hashlib.sha256(token.encode()).hexdigest()
+
     # Validate the magic link
-    magic_link = db.query(MagicLink).filter(MagicLink.token == token).first()
+    magic_link = db.query(MagicLink).filter(MagicLink.token == hashed_token).first()
     
     if not magic_link:
         raise HTTPException(
@@ -314,12 +370,8 @@ async def validate_magic_link(
     magic_link.used_at = datetime.now(timezone.utc)
     db.commit()
     
-    # Get frontend URL for redirect
-    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-    redirect_url = f"{frontend_url}/credentials"
-    
     # Create redirect response with cookie
-    response = RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)
+    response = RedirectResponse(url="/form", status_code=status.HTTP_302_FOUND)
     
     # Set cookie with 30 minute expiration
     response.set_cookie(
@@ -328,7 +380,7 @@ async def validate_magic_link(
         max_age=COOKIE_EXPIRATION_MINUTES * 60,
         httponly=True,
         secure=os.getenv("ENVIRONMENT", "development") == "production",
-        samesite="lax",
+        samesite="strict",
         path="/"
     )
     
@@ -375,26 +427,23 @@ def verify_credentials_cookie_dependency(request: Request) -> str:
         )
 
 
-# Public endpoint to get credentials form (protected by cookie)
-@app.get("/api/credentials")
+# Public endpoint to render credentials form (protected by cookie)
+@app.get("/form", response_class=HTMLResponse)
 async def get_credentials_form(
+    request: Request,
     email: str = Depends(verify_credentials_cookie_dependency)
 ):
     """
-    Get credentials form page. Protected by cookie authentication.
+    Render credentials form HTML page. Protected by cookie authentication.
     User must have validated magic link to access this endpoint.
     """
-    return {
-        "authenticated": True,
-        "email": email,
-        "message": "You can now submit your credentials"
-    }
+    return templates.TemplateResponse("form.html", {"request": request, "email": email})
 
 
 # Public endpoint to submit credentials (protected by cookie)
-@app.post("/api/submit-credentials", response_model=CredentialsResponse)
+@app.post("/api/submit-credentials", response_class=HTMLResponse)
 async def submit_credentials(
-    credentials: CredentialsRequest,
+    request: Request,
     email: str = Depends(verify_credentials_cookie_dependency),
     db: Session = Depends(get_db)
 ):
@@ -402,12 +451,52 @@ async def submit_credentials(
     Submit user information and encrypted credentials. Protected by cookie authentication.
     Creates or updates User record with user info, then encrypts and stores credentials.
     """
+    # Parse form data
+    form_data = await request.form()
     try:
+        credentials = CredentialsRequest(
+            user_id=form_data.get("user_id", ""),
+            first_name=form_data.get("first_name") or None,
+            last_name=form_data.get("last_name") or None,
+            username=form_data.get("username", ""),
+            password=form_data.get("password", "")
+        )
+    except Exception as e:
+        return templates.TemplateResponse(
+            "error.html",
+            {
+                "request": request,
+                "title": "Validation Error",
+                "message": str(e),
+                "back_link": "/form"
+            },
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
+    
+    try:
+        # Validate credentials against the timecard portal before encryption
+        login_ok, login_error = await validate_timecard_login(
+            credentials.username,
+            credentials.password
+        )
+        if not login_ok:
+            logger.info(f"Credential validation failed for email {email}: {login_error}")
+            return templates.TemplateResponse(
+                "form.html",
+                {
+                    "request": request,
+                    "email": email,
+                    "error": login_error
+                },
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
         # Verify email from cookie matches the user being created/updated
         # Get or create user with email from cookie
         user = db.query(User).filter(User.email == email.lower()).first()
         
         if not user:
+            #TODO: Make the user table when the first email is sent. 
             # Create new user
             # Check if user_id is already taken
             existing_user_id = db.query(User).filter(User.user_id == credentials.user_id).first()
@@ -528,14 +617,26 @@ async def submit_credentials(
         
         db.commit()
         
-        return CredentialsResponse(
-            success=True,
-            message="Your credentials have been securely stored."
+        return templates.TemplateResponse(
+            "success.html",
+            {
+                "request": request,
+                "message": "Your credentials have been securely stored."
+            }
         )
     
-    except HTTPException:
+    except HTTPException as e:
         db.rollback()
-        raise
+        return templates.TemplateResponse(
+            "error.html",
+            {
+                "request": request,
+                "title": "Error",
+                "message": e.detail,
+                "back_link": "/form"
+            },
+            status_code=e.status_code
+        )
     except Exception as e:
         error_traceback = traceback.format_exc()
         db.rollback()
@@ -552,8 +653,14 @@ async def submit_credentials(
         except Exception as alert_error:
             logger.error(f"Failed to send admin alert: {alert_error}")
         
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while storing your credentials. Please try again later."
+        return templates.TemplateResponse(
+            "error.html",
+            {
+                "request": request,
+                "title": "Error",
+                "message": "An error occurred while storing your credentials. Please try again later.",
+                "back_link": "/form"
+            },
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 

@@ -76,6 +76,9 @@
     <div class="container">
         <h1>Submit Your Credentials</h1>
         <div class="email-info">Email: {{ email }}</div>
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
         <form action="/api/submit-credentials" method="POST" enctype="application/x-www-form-urlencoded">
             <div class="form-group">
                 <label for="user_id">User ID <span class="required">*</span></label>
