@@ -5,7 +5,7 @@ import os
 import json
 from pathlib import Path
 from typing import List, Optional, Dict, Any
-from models import User
+from signoff_models import SignoffUser
 import logging
 
 # Try to load python-dotenv if available
@@ -18,7 +18,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def load_users(config_path: Optional[str] = None) -> List[User]:
+def load_users(config_path: Optional[str] = None) -> List[SignoffUser]:
     """
     Load users from JSON configuration file or environment variables.
     
@@ -26,7 +26,7 @@ def load_users(config_path: Optional[str] = None) -> List[User]:
         config_path: Path to users.json file. If None, looks for users.json in src directory.
     
     Returns:
-        List of User objects
+        List of SignoffUser objects
     """
     users = []
     
@@ -43,21 +43,21 @@ def load_users(config_path: Optional[str] = None) -> List[User]:
                 
             if isinstance(data, list):
                 for user_data in data:
-                    users.append(User(
+                    users.append(SignoffUser(
                         username=user_data.get('username', ''),
                         password=user_data.get('password', ''),
                         email=user_data.get('email', ''),
-                        domain=user_data.get('domain', 'System Authentication'),
+                        domain=user_data.get('domain', 'MC Network'),
                         name=user_data.get('name'),
                         employee_id=user_data.get('employee_id')
                     ))
             elif isinstance(data, dict) and 'users' in data:
                 for user_data in data['users']:
-                    users.append(User(
+                    users.append(SignoffUser(
                         username=user_data.get('username', ''),
                         password=user_data.get('password', ''),
                         email=user_data.get('email', ''),
-                        domain=user_data.get('domain', 'System Authentication'),
+                        domain=user_data.get('domain', 'MC Network'),
                         name=user_data.get('name'),
                         employee_id=user_data.get('employee_id')
                     ))
@@ -73,10 +73,10 @@ def load_users(config_path: Optional[str] = None) -> List[User]:
         username = os.getenv("APIHC_USERNAME")
         password = os.getenv("APIHC_PASSWORD")
         email = os.getenv("APIHC_EMAIL")
-        domain = os.getenv("APIHC_DOMAIN", "System Authentication")
+        domain = os.getenv("APIHC_DOMAIN", "MC Network")
         
         if username and password and email:
-            users.append(User(
+            users.append(SignoffUser(
                 username=username,
                 password=password,
                 email=email,
@@ -104,7 +104,7 @@ def get_app_config() -> Dict[str, Any]:
     """
     return {
         "base_url": os.getenv("APIHC_BASE_URL", "https://llca419.apihealthcare.com"),
-        "default_domain": os.getenv("APIHC_DOMAIN", "System Authentication"),
+        "default_domain": os.getenv("APIHC_DOMAIN", "MC Network"),
         "default_timeout": int(os.getenv("APIHC_TIMEOUT", "30000")),
         "headless": os.getenv("APIHC_HEADLESS", "false").lower() == "true",
         "slow_mo": int(os.getenv("APIHC_SLOW_MO", "0")),
