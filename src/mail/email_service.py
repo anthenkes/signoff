@@ -3,7 +3,7 @@ Email service for sending sign-off results using Resend API.
 """
 import logging
 from typing import List, Optional
-from models import SignOffResult, User
+from signoff_models import SignoffResult, SignoffUser
 from mail.config import get_email_config
 
 logger = logging.getLogger(__name__)
@@ -30,12 +30,12 @@ class EmailService:
         self.from_email = email_config["from_email"]
         self.from_name = email_config.get("from_name", "Time Card Automation")  # type: ignore
 
-    def send_signoff_result(self, result: SignOffResult) -> bool:
+    def send_signoff_result(self, result: SignoffResult) -> bool:
         """
         Send email to user with their sign-off result.
         
         Args:
-            result: The SignOffResult object containing sign-off information
+            result: The SignoffResult object containing sign-off information
         
         Returns:
             True if email sent successfully, False otherwise
@@ -62,12 +62,12 @@ class EmailService:
             logger.error(f"Error sending email to {result.user.email}: {e}")
             return False
 
-    def format_success_email(self, result: SignOffResult) -> tuple[str, str]:
+    def format_success_email(self, result: SignoffResult) -> tuple[str, str]:
         """
         Format email template for successful sign-off.
         
         Args:
-            result: The SignOffResult object
+            result: The SignoffResult object
         
         Returns:
             Tuple of (subject, html_content)
@@ -98,12 +98,12 @@ class EmailService:
         
         return subject, html_content
 
-    def format_error_email(self, result: SignOffResult) -> tuple[str, str]:
+    def format_error_email(self, result: SignoffResult) -> tuple[str, str]:
         """
         Format email template for failed sign-off.
         
         Args:
-            result: The SignOffResult object
+            result: The SignoffResult object
         
         Returns:
             Tuple of (subject, html_content)
@@ -140,12 +140,12 @@ class EmailService:
         
         return subject, html_content
 
-    def format_multi_user_report(self, results: List[SignOffResult]) -> tuple[str, str]:
+    def format_multi_user_report(self, results: List[SignoffResult]) -> tuple[str, str]:
         """
         Format email template for summary report of multiple users.
         
         Args:
-            results: List of SignOffResult objects
+            results: List of SignoffResult objects
         
         Returns:
             Tuple of (subject, html_content)

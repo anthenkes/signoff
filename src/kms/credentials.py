@@ -124,7 +124,7 @@ def get_user_credentials_for_signoff(
         user = None
     
     # Default domain (can be customized based on your needs)
-    domain = "System Authentication"  # Default from env.example
+    domain = "MC Network"  # Default domain
     
     return {
         "username": username,
