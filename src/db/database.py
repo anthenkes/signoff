@@ -9,8 +9,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Create base class for models (always available)
-Base = declarative_base()
 
 # Lazy initialization - these will be set when init_db() is called
 _engine: Optional[create_engine] = None

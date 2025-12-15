@@ -26,7 +26,6 @@ from sqlalchemy.orm import (
     mapped_column, 
     relationship,
 )
-from .database import Base
 
 class Base(DeclarativeBase):
     """Base class for all models."""
@@ -48,6 +47,20 @@ class TimecardRunStatus(str, enum.Enum):
     LOGIN_FAILED_SITE_ERROR = "login_failed_site_error"
     LOGIN_FAILED_UNKNOWN_ERROR = "login_failed_unknown_error"
 
+
+class MagicLink(Base):
+    """Magic link for email-based authentication."""
+    __tablename__ = "magic_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    token: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class User(Base):
