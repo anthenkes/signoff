@@ -209,9 +209,8 @@ class MagicLinkResponse(BaseModel):
 class CredentialsRequest(BaseModel):
     """Request model for credentials submission. Includes user info and credentials."""
     # User information
-    user_id: str = Field(..., min_length=1, max_length=255, description="User ID (unique identifier)")
-    first_name: Optional[str] = Field(None, max_length=255, description="First name (optional)")
-    last_name: Optional[str] = Field(None, max_length=255, description="Last name (optional)")
+    first_name: str = Field(..., min_length=1, max_length=255, description="First name")
+    last_name: str = Field(..., min_length=1, max_length=255, description="Last name")
     
     # Third-party credentials (encrypted)
     username: str = Field(..., min_length=1, max_length=255, description="Timecard username")
@@ -454,10 +453,21 @@ async def submit_credentials(
     # Parse form data
     form_data = await request.form()
     try:
+        first_name = (form_data.get("first_name") or "").strip()
+        last_name = (form_data.get("last_name") or "").strip()
+        if not first_name or not last_name:
+            return templates.TemplateResponse(
+                "form.html",
+                {
+                    "request": request,
+                    "email": email,
+                    "error": "First name and last name are required."
+                },
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
         credentials = CredentialsRequest(
-            user_id=form_data.get("user_id", ""),
-            first_name=form_data.get("first_name") or None,
-            last_name=form_data.get("last_name") or None,
+            first_name=first_name,
+            last_name=last_name,
             username=form_data.get("username", ""),
             password=form_data.get("password", "")
         )
@@ -496,37 +506,16 @@ async def submit_credentials(
         user = db.query(User).filter(User.email == email.lower()).first()
         
         if not user:
-            #TODO: Make the user table when the first email is sent. 
-            # Create new user
-            # Check if user_id is already taken
-            existing_user_id = db.query(User).filter(User.user_id == credentials.user_id).first()
-            if existing_user_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"User ID '{credentials.user_id}' is already taken."
-                )
-            
             user = User(
                 email=email.lower(),
-                user_id=credentials.user_id,
                 first_name=credentials.first_name,
                 last_name=credentials.last_name
             )
             db.add(user)
             db.flush()  # Get user.id
-            logger.info(f"Created new user: {email} with user_id: {credentials.user_id}")
+            logger.info(f"Created new user: {email} with user_id: {user.user_id}")
         else:
             # Update existing user info (but not email or user_id)
-            if credentials.user_id != user.user_id:
-                # Check if new user_id is available
-                existing_user_id = db.query(User).filter(User.user_id == credentials.user_id).first()
-                if existing_user_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"User ID '{credentials.user_id}' is already taken."
-                    )
-                user.user_id = credentials.user_id
-            
             user.first_name = credentials.first_name
             user.last_name = credentials.last_name
             user.updated_at = datetime.now(timezone.utc)

@@ -69,7 +69,12 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     user_id: Mapped[str] = mapped_column(
-        String(255), nullable=False, unique=True, index=True
+        # Public stable identifier (not the DB PK). Generated server-side.
+        String(36),
+        nullable=False,
+        unique=True,
+        index=True,
+        default=lambda: str(uuid4()),
     )
 
     # Profile Information
