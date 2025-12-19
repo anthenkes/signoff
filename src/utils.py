@@ -5,12 +5,13 @@ import logging
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Union
 from functools import wraps
 import time
 
 if TYPE_CHECKING:
     from signoff_models import SignoffResult, SignoffUser
+    from db.models import User as DBUser
 
 
 class ColoredFormatter(logging.Formatter):
@@ -189,7 +190,7 @@ def ensure_directory(path: str) -> Path:
     return dir_path
 
 
-def get_screenshot_path(user: "User", suffix: str = "") -> str:
+def get_screenshot_path(user: Union["SignoffUser", "DBUser"], suffix: str = "") -> str:
     """
     Generate a screenshot path for a user.
     
@@ -201,9 +202,22 @@ def get_screenshot_path(user: "User", suffix: str = "") -> str:
         Path string for the screenshot
     """
     screenshots_dir = ensure_directory("screenshots")
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    username_safe = user.username.replace(" ", "_").replace("/", "_")
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    
+    # Use full name if available, otherwise fall back to username
+    if hasattr(user, 'name') and user.name:
+        name_safe = user.name.replace(" ", "_").replace("/", "_")
+    elif hasattr(user, 'first_name') and hasattr(user, 'last_name'):
+        # Handle database User model with first_name and last_name
+        first = user.first_name or ""
+        last = user.last_name or ""
+        name_safe = f"{first}_{last}".strip("_").replace(" ", "_").replace("/", "_")
+        if not name_safe:
+            name_safe = getattr(user, 'username', getattr(user, 'email', 'unknown')).replace(" ", "_").replace("/", "_")
+    else:
+        name_safe = getattr(user, 'username', getattr(user, 'email', 'unknown')).replace(" ", "_").replace("/", "_")
+    
     suffix_str = f"_{suffix}" if suffix else ""
-    filename = f"{username_safe}{suffix_str}_{timestamp}.png"
+    filename = f"{name_safe}{suffix_str}_{date_str}.png"
     return str(screenshots_dir / filename)
 
