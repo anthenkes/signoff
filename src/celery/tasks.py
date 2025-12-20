@@ -44,13 +44,21 @@ def signoff_user_timecard(user_id: int):
         
         if not credential:
             logger.error(f"No credentials found for user {user.email}")
+            # Set last_timecard_check_at even when credentials are missing
+            user.last_timecard_check_at = datetime.now(timezone.utc)
+            user.last_timecard_check_status = TimecardRunStatus.LOGIN_FAILED_BAD_CREDENTIALS
+            db.commit()
             return
 
-        # 2. Create TimecardRun record at the start
+        # 2. Set last_timecard_check_at (attempt timestamp) - tracks when we tried to log in
+        check_timestamp = datetime.now(timezone.utc)
+        user.last_timecard_check_at = check_timestamp
+        
+        # 3. Create TimecardRun record at the start
         timecard_run = TimecardRun(
             user_db_id=user.id,
             credential_id=credential.id,
-            started_at=datetime.now(timezone.utc),
+            started_at=check_timestamp,
             status=TimecardRunStatus.LOGIN_FAILED_UNKNOWN_ERROR,  # Default, will update on completion
             login_success=False,
             signed_off_performed=False,
@@ -60,11 +68,14 @@ def signoff_user_timecard(user_id: int):
         db.commit()  # Commit early to get the ID
         logger.info(f"Created TimecardRun record {timecard_run.id} for user {user.email}")
 
-        # 3. Decrypt credentials using KMS
+        # 4. Decrypt credentials using KMS
         try:
             creds_dict = get_user_credentials_for_signoff(db, user_id=user_id)
         except ValueError as e:
             logger.error(f"Failed to get credentials for user {user.email}: {e}")
+            # Ensure last_timecard_check_at is set even on early failure
+            if user.last_timecard_check_at is None:
+                user.last_timecard_check_at = datetime.now(timezone.utc)
             timecard_run.completed_at = datetime.now(timezone.utc)
             timecard_run.status = TimecardRunStatus.LOGIN_FAILED_BAD_CREDENTIALS
             timecard_run.error_reason = str(e)
@@ -72,13 +83,16 @@ def signoff_user_timecard(user_id: int):
             return
         except Exception as e:
             logger.error(f"Error decrypting credentials for user {user.email}: {e}")
+            # Ensure last_timecard_check_at is set even on early failure
+            if user.last_timecard_check_at is None:
+                user.last_timecard_check_at = datetime.now(timezone.utc)
             timecard_run.completed_at = datetime.now(timezone.utc)
             timecard_run.status = TimecardRunStatus.LOGIN_FAILED_UNKNOWN_ERROR
             timecard_run.error_reason = f"Decryption error: {str(e)}"
             db.commit()
             raise
 
-        # 4. Create User dataclass for signoff automation
+        # 5. Create User dataclass for signoff automation
         signoff_user = SignoffUser(
             username=creds_dict["username"],
             password=creds_dict["password"],
@@ -88,13 +102,13 @@ def signoff_user_timecard(user_id: int):
             employee_id=user.user_id
         )
 
-        # 5. Get app config for base_url and other settings
+        # 6. Get app config for base_url and other settings
         app_config = get_app_config()
         base_url = app_config.get("base_url", "https://timecard.example.com")
         headless = app_config.get("headless", True)
         slow_mo = app_config.get("slow_mo", 0)
 
-        # 6. Run Playwright automation
+        # 7. Run Playwright automation
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=headless, slow_mo=slow_mo)
             try:
@@ -106,7 +120,7 @@ def signoff_user_timecard(user_id: int):
                     slow_mo=slow_mo
                 )
                 
-                # 7. Determine status from result
+                # 8. Determine status from result
                 error_lower = (result.error or "").lower()
                 message_lower = (result.message or "").lower()
                 
@@ -132,13 +146,14 @@ def signoff_user_timecard(user_id: int):
                         run_status = TimecardRunStatus.LOGIN_FAILED_UNKNOWN_ERROR
                     user.failed_login_count += 1
                 
-                # 8. Update TimecardRun record
+                # 9. Update TimecardRun record
                 timecard_run.completed_at = datetime.now(timezone.utc)
                 timecard_run.status = run_status
                 timecard_run.error_reason = result.error[:255] if result.error else None  # Truncate to fit String(255)
                 
-                # 9. Update User record
+                # 10. Update User record
                 user.last_timecard_check_status = run_status
+                # Note: last_timecard_check_at was already set at the start of the attempt
                 
                 db.commit()
                 logger.info(f"Signoff completed for user {user.email}: {result.message}")
@@ -156,6 +171,9 @@ def signoff_user_timecard(user_id: int):
                 timecard_run.status = TimecardRunStatus.LOGIN_FAILED_UNKNOWN_ERROR
                 timecard_run.error_reason = f"Exception: {str(e)[:255]}"  # Truncate to fit String(255)
             if user is not None:
+                # Ensure last_timecard_check_at is set even on exception
+                if user.last_timecard_check_at is None:
+                    user.last_timecard_check_at = datetime.now(timezone.utc)
                 user.last_timecard_check_status = TimecardRunStatus.LOGIN_FAILED_UNKNOWN_ERROR
                 user.failed_login_count += 1
             db.commit()
