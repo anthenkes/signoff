@@ -6,7 +6,6 @@ Handles login, navigation, sign-off confirmation, and email notifications.
 import sys
 import argparse
 import logging
-import random
 from pathlib import Path
 from datetime import datetime
 from playwright.sync_api import sync_playwright, Browser, Page
@@ -19,27 +18,9 @@ from play.pages.login_page import LoginPage
 from play.pages.dashboard_page import DashboardPage
 from play.pages.employee_page import EmployeePage
 from play.pages.signoff_confirmation_page import SignOffConfirmationPage
+from kms.utils import obfuscate_credential
 
 logger = logging.getLogger(__name__)
-
-
-def _obfuscate_credential(value: str) -> str:
-    """
-    Obfuscate a credential by overwriting with random-length null bytes.
-    
-    This prevents attackers from inferring the original credential length
-    if they dump memory. Uses a random length between 8-64 characters.
-    
-    Args:
-        value: The credential string to obfuscate
-        
-    Returns:
-        String of null bytes with random length
-    """
-    # Use random length between 8-64 to obfuscate original length
-    # This range covers most password lengths without being suspiciously long
-    random_length = random.randint(8, 64)
-    return "\x00" * random_length
 
 
 def sign_off_for_user(user: SignoffUser, browser: Browser, base_url: str, headless: bool, slow_mo: int) -> SignoffResult:
@@ -82,6 +63,32 @@ def sign_off_for_user(user: SignoffUser, browser: Browser, base_url: str, headle
             domain=user.domain
         )
         
+        # Wait a moment for the page to process the login
+        page.wait_for_timeout(2000)
+        
+        # Check for login errors before proceeding
+        if login_page.has_login_error():
+            error_message = login_page.get_login_error_message() or "Login failed - invalid credentials"
+            logger.error(f"Login error detected for {user.email}: {error_message}")
+            screenshot_path = get_screenshot_path(user, "login_error")
+            page.screenshot(path=screenshot_path, full_page=True)
+            
+            result = SignoffResult(
+                user=user,
+                success=False,
+                message=f"Login failed: {error_message}",
+                timestamp=datetime.now(),
+                screenshot_path=screenshot_path,
+                error=f"Login error: {error_message}"
+            )
+            # Clear plaintext credentials
+            try:
+                user.password = obfuscate_credential(user.password)
+                user.username = obfuscate_credential(user.username)
+            except Exception:
+                pass
+            return result
+        
         # Wait for dashboard to load (this waits for specific elements)
         dashboard_page = DashboardPage(page)
         dashboard_page.wait_for_dashboard_load()
@@ -93,6 +100,24 @@ def sign_off_for_user(user: SignoffUser, browser: Browser, base_url: str, headle
         # Click Employee sign Off button
         employee_page = EmployeePage(page)
         employee_page.wait_for_employee_page_load()
+        
+        # Check if user has already signed off
+        if employee_page.is_already_signed_off():
+            logger.info(f"User {user.email} has already signed off their timecard")
+            result = SignoffResult(
+                user=user,
+                success=True,
+                message="Already signed off - no action needed",
+                timestamp=datetime.now(),
+                screenshot_path=None
+            )
+            # Clear plaintext credentials
+            try:
+                user.password = obfuscate_credential(user.password)
+                user.username = obfuscate_credential(user.username)
+            except Exception:
+                pass
+            return result
         
         if not employee_page.is_sign_off_button_visible():
             raise Exception("Employee sign Off button is not visible")
@@ -150,8 +175,8 @@ def sign_off_for_user(user: SignoffUser, browser: Browser, base_url: str, headle
         # This helps minimize the time plaintext credentials exist in memory
         # Uses random-length obfuscation to prevent length inference
         try:
-            user.password = _obfuscate_credential(user.password)
-            user.username = _obfuscate_credential(user.username)
+            user.password = obfuscate_credential(user.password)
+            user.username = obfuscate_credential(user.username)
         except Exception:
             pass  # Best effort - don't fail if clearing fails
         
@@ -159,9 +184,11 @@ def sign_off_for_user(user: SignoffUser, browser: Browser, base_url: str, headle
         
     except Exception as e:
         error_msg = str(e)
+        error_type = type(e).__name__
         logger.error(f"Error during sign-off for {user.email}: {error_msg}", exc_info=True)
         
         # Take screenshot on error
+        screenshot_path = None
         try:
             if page:
                 screenshot_path = get_screenshot_path(user, "error")
@@ -169,20 +196,59 @@ def sign_off_for_user(user: SignoffUser, browser: Browser, base_url: str, headle
         except Exception as screenshot_error:
             logger.error(f"Failed to take screenshot: {screenshot_error}")
         
+        # Check for login errors if we're still on the login page
+        login_error_detected = False
+        login_error_message = None
+        try:
+            if page and not page.is_closed():
+                # Check if we're still on the login page
+                current_url = page.url
+                if "Login.aspx" in current_url:
+                    login_page = LoginPage(page)
+                    if login_page.has_login_error():
+                        login_error_detected = True
+                        login_error_message = login_page.get_login_error_message()
+        except Exception:
+            pass  # Best effort - if we can't check, continue with generic error
+        
+        # Categorize the error type
+        error_msg_lower = error_msg.lower()
+        error_type_lower = error_type.lower()
+        
+        # Determine error category for better tracking
+        if login_error_detected and login_error_message:
+            # Login/credential error detected from page
+            categorized_error = f"Login error: {login_error_message}"
+        elif any(term in error_type_lower for term in ["timeout", "timeouterror"]):
+            # Timeout errors (site/network issues)
+            categorized_error = f"Site timeout: {error_msg}"
+        elif any(term in error_msg_lower for term in ["timeout", "network", "connection", "502", "503", "504", "500"]):
+            # Network/site errors
+            categorized_error = f"Site error: {error_msg}"
+        elif any(term in error_msg_lower for term in ["credential", "password", "login", "authentication", "unauthorized", "invalid", "user does not exist"]):
+            # Credential/authentication errors
+            categorized_error = f"Credential error: {error_msg}"
+        elif any(term in error_msg_lower for term in ["not found", "not visible", "element", "locator", "selector"]):
+            # Automation errors (element not found, page structure changed)
+            categorized_error = f"Automation error: {error_msg}"
+        else:
+            # Unknown/generic errors
+            categorized_error = f"Error: {error_msg}"
+        
         result = SignoffResult(
             user=user,
             success=False,
-            message=f"Sign-off failed: {error_msg}",
+            message=f"Sign-off failed: {categorized_error}",
             timestamp=datetime.now(),
             screenshot_path=screenshot_path,
-            error=error_msg
+            error=categorized_error
         )
         
         # Clear plaintext credentials from user object on error
         # Uses random-length obfuscation to prevent length inference
         try:
-            user.password = _obfuscate_credential(user.password)
-            user.username = _obfuscate_credential(user.username)
+            user.password = obfuscate_credential(user.password)
+            user.username = obfuscate_credential(user.username)
         except Exception:
             pass  # Best effort - don't fail if clearing fails
         
@@ -207,12 +273,12 @@ def sign_off_for_user(user: SignoffUser, browser: Browser, base_url: str, headle
                     # Check if password is not already cleared (not all null bytes)
                     if user.password and not all(c == '\x00' for c in user.password):
                         # Overwrite with random-length null bytes (obfuscates original length)
-                        user.password = _obfuscate_credential(user.password)
+                        user.password = obfuscate_credential(user.password)
                 if hasattr(user, 'username'):
                     # Check if username is not already cleared (not all null bytes)
                     if user.username and not all(c == '\x00' for c in user.username):
                         # Overwrite with random-length null bytes (obfuscates original length)
-                        user.username = _obfuscate_credential(user.username)
+                        user.username = obfuscate_credential(user.username)
             except Exception:
                 pass  # Best effort - credentials may already be cleared or attribute may not exist
                 
