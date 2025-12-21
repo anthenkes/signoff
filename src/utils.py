@@ -78,34 +78,40 @@ def setup_logging(verbose: bool = False, log_file: Optional[str] = None) -> None
 
 def is_bi_weekly_sunday() -> bool:
     """
-    Check if today is a bi-weekly Sunday (every other Sunday).
+    Check if today is a bi-weekly Sunday (every 2 weeks from anchor date).
     
-    Uses a simple algorithm: checks if the day of year is divisible by 14
-    and the weekday is Sunday (0).
+    Uses December 21, 2025 as the anchor date. This function returns True
+    if today is a Sunday and falls exactly on a 2-week interval from that
+    anchor date (i.e., 0, 2, 4, 6... weeks from anchor).
+    
+    Examples:
+        - December 21, 2025 (anchor): True
+        - January 4, 2026 (2 weeks later): True
+        - January 18, 2026 (4 weeks later): True
+        - January 11, 2026 (3 weeks later): False
     
     Returns:
         True if today is a bi-weekly Sunday, False otherwise
     """
-    today = datetime.now()
+    # Anchor date: December 21, 2025 (a Sunday)
+    anchor_date = datetime(2025, 12, 21).date()
+    
+    today = datetime.now().date()
     
     # Check if today is Sunday (0 = Monday, 6 = Sunday)
     if today.weekday() != 6:  # Not Sunday
         return False
     
-    # Get the first Sunday of the year to establish a baseline
-    # Find first Sunday of current year
-    jan_1 = datetime(today.year, 1, 1)
-    days_until_first_sunday = (6 - jan_1.weekday()) % 7
-    first_sunday = jan_1 + timedelta(days=days_until_first_sunday)
+    # Calculate days since anchor date
+    days_since_anchor = (today - anchor_date).days
     
-    # Calculate days since first Sunday
-    days_since_first_sunday = (today - first_sunday).days
+    # If the date is before the anchor, return False
+    if days_since_anchor < 0:
+        return False
     
-    # Check if it's an even number of weeks (bi-weekly)
-    # Every other Sunday means weeks % 2 == 0
-    weeks_since_first_sunday = days_since_first_sunday // 7
-    
-    return weeks_since_first_sunday % 2 == 0
+    # Return True if it's exactly a multiple of 14 days (2 weeks) from anchor
+    # This means: anchor (0 days), +2 weeks (14 days), +4 weeks (28 days), etc.
+    return days_since_anchor % 14 == 0
 
 
 def retry(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0):
