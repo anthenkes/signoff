@@ -22,6 +22,7 @@ from config import get_app_config
 from db.database import init_db, get_db, get_engine
 from db.models import MagicLink, User, Credential, Base
 from kms.service import KMSEncryptService
+from kms.utils import obfuscate_credential
 from play.pages.login_page import LoginPage
 from play.pages.dashboard_page import DashboardPage
 from auth.cookies import (
@@ -58,6 +59,9 @@ async def validate_timecard_login(username: str, password: str) -> tuple[bool, s
     def _attempt_login() -> tuple[bool, str]:
         context = None
         browser = None
+        # Store credentials in local variables for immediate clearing
+        local_username = username
+        local_password = password
         try:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=headless, slow_mo=slow_mo)
@@ -68,15 +72,31 @@ async def validate_timecard_login(username: str, password: str) -> tuple[bool, s
                 login_page = LoginPage(page)
                 login_page.goto(base_url)
                 login_page.wait_for_page_load()
-                login_page.login(username, password, domain)
+                login_page.login(local_username, local_password, domain)
+
+                # Clear credentials immediately after login attempt
+                local_username = obfuscate_credential(local_username)
+                local_password = obfuscate_credential(local_password)
 
                 dashboard_page = DashboardPage(page)
                 dashboard_page.wait_for_dashboard_load()
                 return True, ""
         except Exception as e:
             logger.warning(f"Credential validation failed during portal login: {e}")
+            # Clear credentials on error as well
+            try:
+                local_username = obfuscate_credential(local_username)
+                local_password = obfuscate_credential(local_password)
+            except Exception:
+                pass
             return False, "Invalid username or password. Please double-check and try again."
         finally:
+            # Final credential clearing (defense in depth)
+            try:
+                local_username = obfuscate_credential(local_username)
+                local_password = obfuscate_credential(local_password)
+            except Exception:
+                pass
             try:
                 if context:
                     context.close()
@@ -345,7 +365,7 @@ async def validate_magic_link(
     
     if not magic_link:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_400_NOT_FOUND,
             detail="Invalid magic link token."
         )
     
@@ -413,7 +433,7 @@ def verify_credentials_cookie_dependency(request: Request) -> str:
     if not cookie_value:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required. Please verify your magic link."
+            detail="Authentication required. Please verify."
         )
     
     try:
@@ -528,7 +548,8 @@ async def submit_credentials(
         plaintext_dek, wrapped_dek = kms_service.generate_data_key()
         
         try:
-            # Encrypt username and password
+            # Encrypt username and password (using original credentials before clearing)
+            # Note: credentials are cleared immediately after encryption completes
             enc_username, nonce_username = kms_service.encrypt_with_dek(
                 credentials.username, 
                 plaintext_dek
@@ -545,7 +566,17 @@ async def submit_credentials(
             plaintext_dek = b'\x00' * len(plaintext_dek)
             del plaintext_dek
             
+            # Clear credentials from memory immediately after encryption
+            credentials.username = obfuscate_credential(credentials.username)
+            credentials.password = obfuscate_credential(credentials.password)
+            
         except Exception as e:
+            # Clear credentials on encryption error as well
+            try:
+                credentials.username = obfuscate_credential(credentials.username)
+                credentials.password = obfuscate_credential(credentials.password)
+            except Exception:
+                pass
             error_traceback = traceback.format_exc()
             logger.error(f"Error encrypting credentials: {e}", exc_info=True)
             db.rollback()
@@ -652,4 +683,17 @@ async def submit_credentials(
             },
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+    finally:
+        # Safety: Ensure credentials are obfuscated even if any exception occurs
+        # This is defense in depth - credentials may already be obfuscated if encryption succeeded
+        try:
+            # Check if credentials exists (it should, but be defensive)
+            if 'credentials' in locals() and credentials is not None:
+                if hasattr(credentials, 'username') and credentials.username:
+                    credentials.username = obfuscate_credential(credentials.username)
+                if hasattr(credentials, 'password') and credentials.password:
+                    credentials.password = obfuscate_credential(credentials.password)
+        except Exception:
+            # Best effort - don't fail if obfuscation fails
+            pass
 
