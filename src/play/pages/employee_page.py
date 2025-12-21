@@ -115,6 +115,43 @@ class EmployeePage(BasePage):
         """Check if the Employee sign Off button is visible."""
         return self.is_element_visible(self.employee_sign_off_button, timeout=5000)
 
+    @property
+    def employee_unsign_off_button(self) -> Locator:
+        """
+        Get the 'Employee Un-Sign Off' button.
+        
+        The button is inside the Employee Actions iframe, so we need to access it
+        through the frame locator.
+        
+        This button appears when the user has already signed off.
+        """
+        frame_locator = self._get_employee_actions_frame_locator()
+        return frame_locator.locator("#formContentPlaceHolder_employeeUnsignOffApiButton")
+
+    def is_unsign_off_button_visible(self) -> bool:
+        """Check if the Employee Un-Sign Off button is visible (indicates already signed off)."""
+        return self.is_element_visible(self.employee_unsign_off_button, timeout=5000)
+
+    def is_already_signed_off(self) -> bool:
+        """
+        Check if the user has already signed off their timecard.
+        
+        Returns True if either:
+        - The blue thumbs up icon is visible (indicates signed off)
+        - The "Un-Sign Off" button is visible (instead of "Sign Off" button)
+        """
+        # Check for blue thumbs up icon (most reliable indicator)
+        if self.is_blue_thumbs_up():
+            logger.info("Blue thumbs up icon detected - user already signed off")
+            return True
+        
+        # Check for Un-Sign Off button (alternative indicator)
+        if self.is_unsign_off_button_visible():
+            logger.info("Un-Sign Off button detected - user already signed off")
+            return True
+        
+        return False
+
     def click_employee_sign_off(self) -> Page:
         """
         Click the 'Employee sign Off' button and wait for new window to open.

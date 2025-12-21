@@ -108,3 +108,49 @@ class LoginPage(BasePage):
         # (username/password may have display:none initially)
         return self.is_element_visible(self.sign_in_button, timeout=5000)
 
+    @property
+    def validation_summary(self) -> Locator:
+        """
+        Get the validation summary error element.
+        
+        Note: The validation summary is in the main page DOM, not in an iframe.
+        This is different from the employee page where buttons are inside iframes.
+        """
+        return self.page.locator("#formContentPlaceHolder_validationSummary").first
+
+    def has_login_error(self) -> bool:
+        """
+        Check if there is a login error displayed on the page.
+        
+        Returns True if the validation summary is visible and contains error text.
+        """
+        try:
+            validation_summary = self.validation_summary
+            # Check if the element exists and is visible
+            if validation_summary.count() > 0:
+                # Check if it's visible (not display:none)
+                is_visible = validation_summary.is_visible(timeout=2000)
+                if is_visible:
+                    # Check if it contains error text
+                    text = validation_summary.inner_text(timeout=1000)
+                    if text and text.strip():
+                        return True
+            return False
+        except Exception:
+            # If we can't check, assume no error
+            return False
+
+    def get_login_error_message(self) -> str | None:
+        """
+        Get the login error message if one is displayed.
+        
+        Returns the error message text, or None if no error is displayed.
+        """
+        try:
+            if self.has_login_error():
+                text = self.validation_summary.inner_text(timeout=1000)
+                return text.strip() if text else None
+            return None
+        except Exception:
+            return None
+
