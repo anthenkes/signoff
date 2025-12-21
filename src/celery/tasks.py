@@ -8,8 +8,54 @@ from kms.credentials import get_user_credentials_for_signoff
 from signoff_models import SignoffUser  # Dataclass for signoff automation workflow
 from signoff_timecard import sign_off_for_user
 from config import get_app_config
+from utils import is_bi_weekly_sunday
 
 logger = logging.getLogger(__name__)
+
+
+def categorize_error_status(error_message: str, error_type: str | None = None) -> TimecardRunStatus:
+    """
+    Categorize an error message into the appropriate TimecardRunStatus.
+    
+    This function checks for specific error prefixes from signoff_timecard.py first
+    (which uses login_page.py error detection), then falls back to pattern matching.
+    
+    Args:
+        error_message: The error message string
+        error_type: Optional exception type name (for exception handling cases)
+    
+    Returns:
+        The appropriate TimecardRunStatus enum value
+    """
+    error_lower = error_message.lower()
+    error_type_lower = (error_type or "").lower()
+    
+    # Check for specific error prefixes from signoff_timecard.py first (most accurate)
+    # These prefixes are added by signoff_timecard.py based on login_page.py error detection
+    if error_lower.startswith("login error:") or error_lower.startswith("credential error:"):
+        # Login/credential errors detected from login page or categorized as credential errors
+        return TimecardRunStatus.LOGIN_FAILED_BAD_CREDENTIALS
+    elif error_lower.startswith("site error:") or error_lower.startswith("site timeout:"):
+        # Site/network errors
+        return TimecardRunStatus.LOGIN_FAILED_SITE_ERROR
+    elif error_lower.startswith("automation error:"):
+        # Automation errors (element not found, page structure changed)
+        return TimecardRunStatus.LOGIN_FAILED_UNKNOWN_ERROR
+    
+    # Fallback to pattern matching for errors without specific prefixes
+    # Check exception type first (for exception handling cases)
+    if error_type_lower and any(term in error_type_lower for term in ["timeout", "playwright", "browser"]):
+        return TimecardRunStatus.LOGIN_FAILED_SITE_ERROR
+    
+    # Check error message patterns
+    if any(term in error_lower for term in ["credential", "password", "login", "authentication", "unauthorized", "invalid", "user does not exist", "401", "403"]):
+        return TimecardRunStatus.LOGIN_FAILED_BAD_CREDENTIALS
+    elif any(term in error_lower for term in ["timeout", "network", "connection", "site", "server", "502", "503", "504", "500", "playwright", "browser"]):
+        return TimecardRunStatus.LOGIN_FAILED_SITE_ERROR
+    
+    # Database errors and other internal errors remain as unknown
+    return TimecardRunStatus.LOGIN_FAILED_UNKNOWN_ERROR
+
 
 @celery_app.task
 def signoff_user_timecard(user_id: int):
@@ -121,7 +167,6 @@ def signoff_user_timecard(user_id: int):
                 )
                 
                 # 8. Determine status from result
-                error_lower = (result.error or "").lower()
                 message_lower = (result.message or "").lower()
                 
                 if result.success:
@@ -138,12 +183,7 @@ def signoff_user_timecard(user_id: int):
                     user.last_timecard_signoff_at = datetime.now(timezone.utc)
                 else:
                     # Determine failure type from error message
-                    if any(term in error_lower for term in ["credential", "password", "login", "authentication", "unauthorized"]):
-                        run_status = TimecardRunStatus.LOGIN_FAILED_BAD_CREDENTIALS
-                    elif any(term in error_lower for term in ["timeout", "network", "connection", "site", "server"]):
-                        run_status = TimecardRunStatus.LOGIN_FAILED_SITE_ERROR
-                    else:
-                        run_status = TimecardRunStatus.LOGIN_FAILED_UNKNOWN_ERROR
+                    run_status = categorize_error_status(result.error or "")
                     user.failed_login_count += 1
                 
                 # 9. Update TimecardRun record
@@ -164,21 +204,35 @@ def signoff_user_timecard(user_id: int):
     except Exception as e:
         db.rollback()
         logger.error(f"Error in signoff task for user_id {user_id}: {e}", exc_info=True)
+        
+        # Determine error type based on exception class and message
+        error_msg = str(e)
+        error_type = type(e).__name__
+        run_status = categorize_error_status(error_msg, error_type)
+        
         # Update TimecardRun and User status on error
+        # Note: After rollback, we need to re-query objects since they're detached from the session
         try:
             if timecard_run is not None:
-                timecard_run.completed_at = datetime.now(timezone.utc)
-                timecard_run.status = TimecardRunStatus.LOGIN_FAILED_UNKNOWN_ERROR
-                timecard_run.error_reason = f"Exception: {str(e)[:255]}"  # Truncate to fit String(255)
+                # Re-query timecard_run after rollback since it's detached from the session
+                timecard_run = db.query(TimecardRun).filter(TimecardRun.id == timecard_run.id).first()
+                if timecard_run:
+                    timecard_run.completed_at = datetime.now(timezone.utc)
+                    timecard_run.status = run_status
+                    timecard_run.error_reason = f"Exception: {str(e)[:255]}"  # Truncate to fit String(255)
             if user is not None:
-                # Ensure last_timecard_check_at is set even on exception
-                if user.last_timecard_check_at is None:
-                    user.last_timecard_check_at = datetime.now(timezone.utc)
-                user.last_timecard_check_status = TimecardRunStatus.LOGIN_FAILED_UNKNOWN_ERROR
-                user.failed_login_count += 1
+                # Re-query user after rollback since it's detached from the session
+                user = db.query(User).filter(User.id == user_id).first()
+                if user:
+                    # Ensure last_timecard_check_at is set even on exception
+                    if user.last_timecard_check_at is None:
+                        user.last_timecard_check_at = datetime.now(timezone.utc)
+                    user.last_timecard_check_status = run_status
+                    user.failed_login_count += 1
             db.commit()
         except Exception as update_error:
             logger.error(f"Failed to update records on error: {update_error}")
+            db.rollback()
         raise
     finally:
         db.close()
@@ -190,7 +244,7 @@ def enqueue_all_signoffs_if_needed():
     Runs on a schedule (e.g., weekly).
     If it's a 'signoff Sunday', enqueue signoff jobs for all eligible users.
     """
-    if not is_signoff_sunday():
+    if not is_bi_weekly_sunday():
         logger.info("Not a signoff Sunday, skipping enqueue")
         return
 
@@ -225,16 +279,3 @@ def enqueue_all_signoffs_if_needed():
         raise
     finally:
         db.close()
-
-
-def is_signoff_sunday() -> bool:
-    """
-    Decide if this is a 'signoff Sunday'.
-    Options:
-      - Check calendar parity (e.g., every 2 weeks from a known anchor date).
-      - Or, store last_global_signoff_date in a settings table and require >= 14 days.
-    """
-    today = datetime.now(timezone.utc).date()
-    # Example: every other Sunday based on week number parity
-    # Adjust to your real pay-period logic.
-    return today.weekday() == 6 and (today.isocalendar().week % 2 == 0)
