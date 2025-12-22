@@ -40,8 +40,7 @@ src/
 ├── config.py               # Base/shared configuration
 ├── models.py              # Shared data models (User, SignOffResult)
 ├── utils.py               # Shared utility functions
-├── signoff_timecard.py    # Main automation script
-├── schedule_signoff.py    # Scheduling wrapper script
+├── signoff_timecard.py    # Main automation script (used by Celery tasks)
 ├── env.example            # Example environment variables
 └── users.json.example     # Example user configuration
 ```
@@ -73,5 +72,4 @@ REST API endpoints:
 - **config.py**: Base configuration (app settings, user loading, validation)
 - **models.py**: Shared data models (User, SignOffResult dataclasses)
 - **utils.py**: Shared utilities (logging, scheduling, formatting, etc.)
-- **signoff_timecard.py**: Main script for automating time card sign-off
-- **schedule_signoff.py**: Wrapper script for scheduled bi-weekly execution
+- **signoff_timecard.py**: Main script for automating time card sign-off (used by Celery tasks)
