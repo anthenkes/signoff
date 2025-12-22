@@ -214,6 +214,9 @@ class TimecardRun(Base):
     login_success: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     signed_off_performed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     already_signed_off_detected: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    
+    # Track which version of credentials was used (for race condition detection; very unlikely with current password update flow)
+    credential_dek_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     user: Mapped[User] = relationship()
     credential: Mapped["Credential"] = relationship()

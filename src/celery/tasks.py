@@ -12,6 +12,14 @@ from utils import is_bi_weekly_sunday
 
 logger = logging.getLogger(__name__)
 
+# Try to import EmailService for admin alerts
+try:
+    from mail.email_service import EmailService
+    EMAIL_SERVICE_AVAILABLE = True
+except ImportError:
+    EMAIL_SERVICE_AVAILABLE = False
+    logger.warning("EmailService not available. Admin alerts will not be sent.")
+
 
 def categorize_error_status(error_message: str, error_type: str | None = None) -> TimecardRunStatus:
     """
@@ -94,6 +102,20 @@ def signoff_user_timecard(user_id: int):
             user.last_timecard_check_at = datetime.now(timezone.utc)
             user.last_timecard_check_status = TimecardRunStatus.LOGIN_FAILED_BAD_CREDENTIALS
             db.commit()
+            
+            # Send admin alert about missing credentials
+            if EMAIL_SERVICE_AVAILABLE:
+                try:
+                    email_service = EmailService()
+                    email_service.send_admin_alert(
+                        "User Missing Credentials",
+                        f"User {user.email} (ID: {user.id}) was queued for signoff but has no credentials stored. "
+                        f"The signoff task was skipped. Please ensure credentials are set up for this user.",
+                        f"User ID: {user.id}\nUser Email: {user.email}\nUser Name: {user.first_name} {user.last_name}"
+                    )
+                except Exception as alert_error:
+                    logger.error(f"Failed to send admin alert for missing credentials: {alert_error}")
+            
             return
 
         # 2. Set last_timecard_check_at (attempt timestamp) - tracks when we tried to log in
@@ -101,9 +123,12 @@ def signoff_user_timecard(user_id: int):
         user.last_timecard_check_at = check_timestamp
         
         # 3. Create TimecardRun record at the start
+        # Store the credential's dek_version to detect race conditions
+        stored_dek_version = credential.dek_version
         timecard_run = TimecardRun(
             user_db_id=user.id,
             credential_id=credential.id,
+            credential_dek_version=stored_dek_version,
             started_at=check_timestamp,
             status=TimecardRunStatus.LOGIN_FAILED_UNKNOWN_ERROR,  # Default, will update on completion
             login_success=False,
@@ -115,7 +140,23 @@ def signoff_user_timecard(user_id: int):
         logger.info(f"Created TimecardRun record {timecard_run.id} for user {user.email}")
 
         # 4. Decrypt credentials using KMS
+        # Check for race condition: credentials may have been updated after TimecardRun was created
         try:
+            # Refresh credential from database to get latest version
+            db.refresh(credential)
+            current_dek_version = credential.dek_version
+            
+            if current_dek_version != stored_dek_version:
+                logger.warning(
+                    f"Credential version changed during signoff run for user {user.email}. "
+                    f"TimecardRun was created with dek_version={stored_dek_version}, "
+                    f"but current version is {current_dek_version}. "
+                    f"Using current credentials (credentials were updated mid-run)."
+                )
+                # Update TimecardRun to reflect the version actually used
+                timecard_run.credential_dek_version = current_dek_version
+                db.commit()
+            
             creds_dict = get_user_credentials_for_signoff(db, user_id=user_id)
         except ValueError as e:
             logger.error(f"Failed to get credentials for user {user.email}: {e}")
@@ -263,12 +304,28 @@ def enqueue_all_signoffs_if_needed():
 
         # Filter users who have credentials
         eligible_users = []
+        users_without_credentials = []
         for user in users:
             # Check if user has credentials
             if user.credentials:
                 eligible_users.append(user)
             else:
                 logger.warning(f"User {user.email} has no credentials stored")
+                users_without_credentials.append(user)
+        
+        # Send admin alert if there are users without credentials
+        if users_without_credentials and EMAIL_SERVICE_AVAILABLE:
+            try:
+                email_service = EmailService()
+                user_list = ", ".join([f"{u.email} (ID: {u.id})" for u in users_without_credentials])
+                email_service.send_admin_alert(
+                    "Users Missing Credentials During Enqueue",
+                    f"Found {len(users_without_credentials)} user(s) without credentials during signoff enqueue. "
+                    f"These users were skipped and will not receive automated signoffs.",
+                    f"Users without credentials:\n{user_list}\n\nTotal eligible users enqueued: {len(eligible_users)}"
+                )
+            except Exception as alert_error:
+                logger.error(f"Failed to send admin alert for users without credentials: {alert_error}")
 
         logger.info(f"Enqueuing signoff tasks for {len(eligible_users)} eligible users")
         for user in eligible_users:
