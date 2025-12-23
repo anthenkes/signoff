@@ -152,10 +152,6 @@ class Credential(Base):
     enc_password: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     nonce_password: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
 
-    # In case 2factor auth is ever added
-    enc_totp: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
-    nonce_totp: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
-
     # Per-record DEK
     dek_wrapped: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     kms_key_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -169,9 +165,6 @@ class Credential(Base):
         DateTime(timezone=True), onupdate=func.now()
     )
     last_success_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    rotation_due_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 

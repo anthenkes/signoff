@@ -221,7 +221,9 @@ def signoff_user_timecard(user_id: int):
                         timecard_run.signed_off_performed = True
                         user.auto_signed_off_count += 1
                     timecard_run.login_success = True
-                    user.last_timecard_signoff_at = datetime.now(timezone.utc)
+                    success_timestamp = datetime.now(timezone.utc)
+                    user.last_timecard_signoff_at = success_timestamp
+                    credential.last_success_at = success_timestamp
                 else:
                     # Determine failure type from error message
                     run_status = categorize_error_status(result.error or "")
