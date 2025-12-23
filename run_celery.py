@@ -34,7 +34,7 @@ if __name__ == "__main__":
     
     # Set up sys.argv for worker_main
     original_argv = sys.argv
-    sys.argv = ['celery', 'worker', '--loglevel=info']
+    sys.argv = ['worker', '--loglevel=info']
     
     try:
         celery_app.worker_main()
