@@ -114,7 +114,7 @@ def get_celery_config() -> Dict[str, Any]:
         ),
         'task_retry_backoff': True,  # Use exponential backoff
         'task_retry_backoff_max': 600,  # Max backoff: 10 minutes
-        'task_retry_jitter': True,  # Add jitter to retry delays
+        'task_retry_jitter': True,  # Add jitter to retry delays (randomized delay between retries so not all retries happen at the same time)
         'task_max_retries': 3,  # Maximum 3 retries
         
         # Queue settings
