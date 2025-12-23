@@ -2,8 +2,8 @@ from datetime import datetime, timezone
 import logging
 from playwright.sync_api import sync_playwright
 from . import celery_app
-from db import SessionLocal, User  # SQLAlchemy models
-from db.models import TimecardRunStatus, TimecardRun, Credential  # Enum for status and models
+from db import SessionLocal  # SQLAlchemy session
+from db.models import User, TimecardRunStatus, TimecardRun, Credential  # SQLAlchemy models
 from kms.credentials import get_user_credentials_for_signoff
 from signoff_models import SignoffUser  # Dataclass for signoff automation workflow
 from signoff_timecard import sign_off_for_user
