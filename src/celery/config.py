@@ -128,7 +128,10 @@ def get_celery_config() -> Dict[str, Any]:
         'worker_task_log_format': '[%(asctime)s: %(levelname)s/%(processName)s][%(task_name)s(%(task_id)s)] %(message)s',
         
         # Import settings
-        'imports': ('src.celery.tasks',),
+        'imports': (
+            'src.celery.tasks',
+            'src.celery.celery_test.test_tasks',  # Test tasks for verification
+        ),
     }
     
     logger.info("Celery configuration loaded")
