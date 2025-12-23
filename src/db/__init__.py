@@ -1,7 +1,8 @@
 """
 Database module for PostgreSQL with SQLAlchemy.
 """
-from .database import Base, init_db, get_engine, get_session_local
+from .models import Base
+from .database import init_db, get_engine, get_session_local
 from .config import get_db_config
 
 # For backward compatibility, expose these as properties
