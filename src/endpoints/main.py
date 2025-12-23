@@ -1,10 +1,9 @@
 """
 FastAPI application main file.
 """
-from fastapi import FastAPI, Request, HTTPException, Depends, status, Query, Form
+from fastapi import FastAPI, Request, HTTPException, Depends, status, Query
 from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
 from starlette.templating import Jinja2Templates
-from fastapi.security import HTTPHeader
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
@@ -188,7 +187,8 @@ async def protect_internal_routes(request: Request, call_next):
     # Routes protected by cookie authentication (not public, but don't need internal secret)
     cookie_protected_routes = [
         "/api/credentials",
-        "/api/submit-credentials"
+        "/api/submit-credentials",
+        "/form"
     ]
     
     # If it's not a public route or cookie-protected route, check for internal secret
@@ -399,7 +399,7 @@ async def validate_magic_link(
         max_age=COOKIE_EXPIRATION_MINUTES * 60,
         httponly=True,
         secure=os.getenv("ENVIRONMENT", "development") == "production",
-        samesite="strict",
+        samesite="lax",
         path="/"
     )
     
