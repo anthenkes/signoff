@@ -212,6 +212,7 @@ def signoff_user_timecard(user_id: int):
                 
                 if result.success:
                     # Check if already signed off (based on message)
+                    # TODO: add the emailing of the screenshot here
                     if "already" in message_lower or "already signed" in message_lower:
                         run_status = TimecardRunStatus.LOGIN_SUCCESS_ALREADY_SIGNED
                         timecard_run.already_signed_off_detected = True
