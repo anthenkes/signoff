@@ -227,3 +227,66 @@ def get_screenshot_path(user: Union["SignoffUser", "DBUser"], suffix: str = "") 
     filename = f"{name_safe}{suffix_str}_{date_str}.png"
     return str(screenshots_dir / filename)
 
+
+def get_screenshot_identifier(user: Union["SignoffUser", "DBUser"]) -> str:
+    """
+    Generate a sanitized identifier for a user's screenshot filename/key.
+    Used for both local file paths and S3 bucket keys to ensure consistency.
+    
+    Args:
+        user: The User object
+    
+    Returns:
+        Sanitized identifier string (e.g., "user_at_example_com")
+    """
+    # Use email as the identifier for consistency (email is unique and stable)
+    # Fall back to username or name if email not available
+    if hasattr(user, 'email') and user.email:
+        identifier = user.email.replace("@", "_at_").replace(".", "_")
+    elif hasattr(user, 'name') and user.name:
+        identifier = user.name.replace(" ", "_").replace("/", "_").replace("@", "_at_").replace(".", "_")
+    elif hasattr(user, 'first_name') and hasattr(user, 'last_name'):
+        first = user.first_name or ""
+        last = user.last_name or ""
+        identifier = f"{first}_{last}".strip("_").replace(" ", "_").replace("/", "_")
+        if not identifier:
+            identifier = "unknown"
+    else:
+        identifier = "unknown"
+    
+    return identifier
+
+
+def get_persistent_screenshot_path(user: Union["SignoffUser", "DBUser"]) -> str:
+    """
+    Generate a persistent screenshot path for a user that gets replaced each run.
+    Used for storing the confirmed signoff screenshot (one per user, replaced bi-weekly).
+    
+    Args:
+        user: The User object
+    
+    Returns:
+        Path string for the screenshot (same filename each time, so it replaces)
+    """
+    screenshots_dir = ensure_directory("screenshots")
+    identifier = get_screenshot_identifier(user)
+    
+    # Use a fixed filename without date - this will replace the previous screenshot
+    filename = f"{identifier}_signoff_confirmed.png"
+    return str(screenshots_dir / filename)
+
+
+def get_screenshot_s3_key(user: Union["SignoffUser", "DBUser"]) -> str:
+    """
+    Generate an S3 key for a user's screenshot in the bucket.
+    Uses the same naming convention as local persistent screenshots for consistency.
+    
+    Args:
+        user: The User object
+    
+    Returns:
+        S3 key string (e.g., "screenshots/user_at_example_com_signoff_confirmed.png")
+    """
+    identifier = get_screenshot_identifier(user)
+    return f"screenshots/{identifier}_signoff_confirmed.png"
+
