@@ -2,9 +2,11 @@
 Email service for sending sign-off results using Resend API.
 """
 import logging
+import base64
 from typing import List, Optional
 from signoff_models import SignoffResult, SignoffUser
 from mail.config import get_email_config
+from storage import get_bucket_service
 
 logger = logging.getLogger(__name__)
 
@@ -52,11 +54,50 @@ class EmailService:
                 "subject": subject,
                 "html": html_content
             }
+            
+            # Always try to attach screenshot (blue thumbs up icon) unless signoff completely failed
+            # Screenshot should be available for all successful signoffs (including "already signed off")
+            screenshot_attached = False
+            if result.success:  # Only attach screenshots for successful signoffs
+                try:
+                    # First try to get screenshot from bucket
+                    bucket_service = get_bucket_service()
+                    screenshot_base64 = None
+                    
+                    if bucket_service:
+                        screenshot_base64 = bucket_service.get_screenshot_base64(result.user)
+                    
+                    # If not in bucket, try local file
+                    if not screenshot_base64 and result.screenshot_path:
+                        try:
+                            with open(result.screenshot_path, 'rb') as f:
+                                screenshot_bytes = f.read()
+                                screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
+                        except Exception as local_error:
+                            logger.warning(f"Failed to read local screenshot file: {local_error}")
+                    
+                    # Attach screenshot if available (should always be available for successful signoffs)
+                    if screenshot_base64:
+                        params["attachments"] = [{
+                            "filename": f"{result.user.email}_signoff_confirmed.png",
+                            "content": screenshot_base64,
+                            "type": "image/png"
+                        }]
+                        screenshot_attached = True
+                        logger.info(f"Attaching blue thumbs up screenshot to email for {result.user.email}")
+                    else:
+                        logger.warning(f"No screenshot available for successful signoff - email sent without attachment")
+                except Exception as attach_error:
+                    logger.warning(f"Failed to attach screenshot to email: {attach_error}")
+                    # Continue without attachment rather than failing
+            # Note: For failed signoffs, we don't attach screenshots (as per requirement)
+            
             email = resend.Emails.send(params)
             
             # Resend returns a TypedDict, so access id as a dictionary key
             email_id = email.get("id", "unknown")
-            logger.info(f"Email sent successfully to {result.user.email}. Email ID: {email_id}")
+            attachment_note = " (with screenshot)" if screenshot_attached else ""
+            logger.info(f"Email sent successfully to {result.user.email}{attachment_note}. Email ID: {email_id}")
             return True
         except Exception as e:
             logger.error(f"Error sending email to {result.user.email}: {e}")
