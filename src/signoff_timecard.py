@@ -13,12 +13,13 @@ from playwright.sync_api import sync_playwright, Browser, Page
 from config import load_users, get_app_config, validate_config
 from signoff_models import SignoffUser, SignoffResult
 from mail.email_service import EmailService
-from utils import setup_logging, format_result_message, get_screenshot_path
+from utils import setup_logging, format_result_message, get_screenshot_path, get_persistent_screenshot_path
 from play.pages.login_page import LoginPage
 from play.pages.dashboard_page import DashboardPage
 from play.pages.employee_page import EmployeePage
 from play.pages.signoff_confirmation_page import SignOffConfirmationPage
 from kms.utils import obfuscate_credential
+from storage import get_bucket_service
 
 logger = logging.getLogger(__name__)
 
@@ -104,12 +105,56 @@ def sign_off_for_user(user: SignoffUser, browser: Browser, base_url: str, headle
         # Check if user has already signed off
         if employee_page.is_already_signed_off():
             logger.info(f"User {user.email} has already signed off their timecard")
+            
+            # Capture blue thumbs up icon screenshot (confirmation of signoff)
+            screenshot_path = None
+            try:
+                # Use the specialized method to capture blue thumbs up icon with tooltip
+                screenshot_path = employee_page.capture_blue_thumbs_up_tooltip()
+                logger.info(f"Blue thumbs up icon screenshot saved to {screenshot_path}")
+                
+                # Move to persistent location and upload to Railway Bucket if available
+                persistent_path = get_persistent_screenshot_path(user)
+                if screenshot_path != persistent_path:
+                    # Remove old screenshot if it exists, then move new one
+                    if Path(persistent_path).exists():
+                        Path(persistent_path).unlink()
+                    # Move screenshot to persistent location
+                    Path(screenshot_path).rename(persistent_path)
+                    screenshot_path = persistent_path
+                
+                # Upload to Railway Bucket if available
+                bucket_service = get_bucket_service()
+                if bucket_service:
+                    try:
+                        s3_key = bucket_service.upload_screenshot(screenshot_path, user)
+                        if s3_key:
+                            logger.info(f"Screenshot uploaded to bucket: {s3_key}")
+                            # Optionally delete local file to save space
+                            Path(screenshot_path).unlink(missing_ok=True)
+                            screenshot_path = None  # Local file deleted, stored in bucket
+                    except Exception as upload_error:
+                        logger.warning(f"Failed to upload screenshot to bucket: {upload_error}")
+                        # Keep local file as fallback
+                else:
+                    logger.debug("Bucket service not available, keeping local screenshot")
+            except Exception as screenshot_error:
+                logger.error(f"Failed to capture blue thumbs up screenshot: {screenshot_error}")
+                # Try fallback: take full page screenshot
+                try:
+                    screenshot_path = get_persistent_screenshot_path(user)
+                    page.screenshot(path=screenshot_path, full_page=True)
+                    logger.info(f"Fallback screenshot saved to {screenshot_path}")
+                except Exception as fallback_error:
+                    logger.error(f"Failed to take fallback screenshot: {fallback_error}")
+                    screenshot_path = None
+            
             result = SignoffResult(
                 user=user,
                 success=True,
                 message="Already signed off - no action needed",
                 timestamp=datetime.now(),
-                screenshot_path=None
+                screenshot_path=screenshot_path
             )
             # Clear plaintext credentials
             try:
@@ -151,9 +196,72 @@ def sign_off_for_user(user: SignoffUser, browser: Browser, base_url: str, headle
         except Exception:
             # Window closed - this is expected and indicates success
             logger.info(f"Confirmation window closed - sign-off successful for {user.email}")
+            
+            # Wait for employee page to update (button changes to "Un-Sign Off" and blue thumbs up appears)
+            # This ensures we capture the blue thumbs up icon
+            try:
+                page.wait_for_timeout(2000)  # Give page time to update
+                # Wait for the Un-Sign Off button to appear (confirms signoff state)
+                frame_locator = employee_page._get_employee_actions_frame_locator()
+                unsign_off_button = frame_locator.locator("#formContentPlaceHolder_employeeUnsignOffApiButton")
+                unsign_off_button.wait_for(state="visible", timeout=10000)
+                logger.info("Employee page updated - Un-Sign Off button visible")
+                
+                # Wait for blue thumbs up icon to appear
+                if employee_page.is_blue_thumbs_up():
+                    logger.info("Blue thumbs up icon is visible - ready to capture screenshot")
+                else:
+                    logger.warning("Blue thumbs up icon not yet visible, waiting...")
+                    page.wait_for_timeout(1000)  # Additional wait for icon to appear
+            except Exception as wait_error:
+                logger.warning(f"Could not verify employee page update: {wait_error}")
+                # Continue anyway - page may have updated
+            
+            # Capture blue thumbs up icon screenshot (confirmation of signoff)
+            screenshot_path = None
+            try:
+                # Use the specialized method to capture blue thumbs up icon with tooltip
+                screenshot_path = employee_page.capture_blue_thumbs_up_tooltip()
+                logger.info(f"Blue thumbs up icon screenshot saved to {screenshot_path}")
+                
+                # Move to persistent location and upload to Railway Bucket if available
+                persistent_path = get_persistent_screenshot_path(user)
+                if screenshot_path != persistent_path:
+                    # Remove old screenshot if it exists, then move new one
+                    if Path(persistent_path).exists():
+                        Path(persistent_path).unlink()
+                    # Move screenshot to persistent location
+                    Path(screenshot_path).rename(persistent_path)
+                    screenshot_path = persistent_path
+                
+                # Upload to Railway Bucket if available
+                bucket_service = get_bucket_service()
+                if bucket_service:
+                    try:
+                        s3_key = bucket_service.upload_screenshot(screenshot_path, user)
+                        if s3_key:
+                            logger.info(f"Screenshot uploaded to bucket: {s3_key}")
+                            # Optionally delete local file to save space
+                            Path(screenshot_path).unlink(missing_ok=True)
+                            screenshot_path = None  # Local file deleted, stored in bucket
+                    except Exception as upload_error:
+                        logger.warning(f"Failed to upload screenshot to bucket: {upload_error}")
+                        # Keep local file as fallback
+                else:
+                    logger.debug("Bucket service not available, keeping local screenshot")
+            except Exception as screenshot_error:
+                logger.error(f"Failed to capture blue thumbs up screenshot: {screenshot_error}")
+                # Try fallback: take full page screenshot
+                try:
+                    screenshot_path = get_persistent_screenshot_path(user)
+                    page.screenshot(path=screenshot_path, full_page=True)
+                    logger.info(f"Fallback screenshot saved to {screenshot_path}")
+                except Exception as fallback_error:
+                    logger.error(f"Failed to take fallback screenshot: {fallback_error}")
+                    screenshot_path = None
+            
             success = True
             message = "Sign-off completed"
-            screenshot_path = None
         
         # If window didn't close automatically, close it manually
         try:
