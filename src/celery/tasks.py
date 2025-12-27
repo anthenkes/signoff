@@ -241,6 +241,16 @@ def signoff_user_timecard(user_id: int):
                 db.commit()
                 logger.info(f"Signoff completed for user {user.email}: {result.message}")
                 
+                # 11. Send email notification with screenshot (if available)
+                if EMAIL_SERVICE_AVAILABLE and result.success:
+                    try:
+                        email_service = EmailService()
+                        email_service.send_signoff_result(result)
+                        logger.info(f"Email notification sent to {user.email}")
+                    except Exception as email_error:
+                        logger.error(f"Failed to send email notification to {user.email}: {email_error}")
+                        # Don't fail the task if email fails
+                
             finally:
                 browser.close()
 
