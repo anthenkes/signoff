@@ -1,5 +1,6 @@
 """
 Email service for sending sign-off results using Resend API.
+Admin emails are sent via Mailtrap.
 """
 import logging
 import base64
@@ -16,6 +17,13 @@ try:
 except ImportError:
     RESEND_AVAILABLE = False
     logger.warning("Resend package not available. Email functionality will be disabled.")
+
+try:
+    import mailtrap as mt
+    MAILTRAP_AVAILABLE = True
+except ImportError:
+    MAILTRAP_AVAILABLE = False
+    logger.warning("Mailtrap package not available. Admin email functionality will be disabled.")
 
 
 class EmailService:
@@ -297,6 +305,7 @@ class EmailService:
     def send_admin_alert(self, subject: str, message: str, error_details: Optional[str] = None) -> bool:
         """
         Send an alert email to the admin when critical errors occur.
+        Uses Mailtrap for admin emails.
         
         Args:
             subject: The subject line of the alert email
@@ -307,13 +316,23 @@ class EmailService:
             True if email sent successfully, False otherwise
         """
         try:
+            if not MAILTRAP_AVAILABLE:
+                logger.warning("Mailtrap package not available. Admin alerts will not be sent.")
+                return False
+            
             email_config = get_email_config()
             admin_email = email_config.get("admin_email")
+            mailtrap_token = email_config.get("mailtrap_token")
             
             if not admin_email:
                 logger.warning("ADMIN_EMAIL not configured. Admin alerts will not be sent.")
                 return False
             
+            if not mailtrap_token:
+                logger.warning("MAILTRAP_API_TOKEN not configured. Admin alerts will not be sent.")
+                return False
+            
+            # Build HTML content
             html_content = f"""
             <html>
             <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -342,18 +361,33 @@ class EmailService:
             </html>
             """
             
-            params: resend.Emails.SendParams = {
-                "from": f"{self.from_name} <{self.from_email}>",
-                "to": [admin_email],
-                "subject": f"[ALERT] {subject}",
-                "html": html_content
-            }
+            # Build plain text version for Mailtrap
+            text_content = f"Admin Alert: {subject}\n\nMessage:\n{message}\n"
+            if error_details:
+                text_content += f"\nError Details:\n{error_details}\n"
+            text_content += "\nThis is an automated alert from the Time Card Sign-Off system."
             
-            email_result = resend.Emails.send(params)
-            email_id = email_result.get("id", "unknown")
-            logger.info(f"Admin alert email sent successfully to {admin_email}. Email ID: {email_id}")
+            # Get Mailtrap configuration
+            mailtrap_from_email = email_config.get("mailtrap_from_email", "hello@demomailtrap.co")
+            mailtrap_from_name = email_config.get("mailtrap_from_name", "Time Card Automation")
+            
+            # Create Mailtrap mail object
+            mail = mt.Mail(
+                sender=mt.Address(email=mailtrap_from_email, name=mailtrap_from_name),
+                to=[mt.Address(email=admin_email)],
+                subject=f"[ALERT] {subject}",
+                text=text_content,
+                html=html_content,
+                category="Admin Alert"
+            )
+            
+            # Send via Mailtrap
+            client = mt.MailtrapClient(token=mailtrap_token)
+            response = client.send(mail)
+            
+            logger.info(f"Admin alert email sent successfully to {admin_email} via Mailtrap. Response: {response}")
             return True
         except Exception as e:
-            logger.error(f"Error sending admin alert email: {e}")
+            logger.error(f"Error sending admin alert email via Mailtrap: {e}")
             return False
 

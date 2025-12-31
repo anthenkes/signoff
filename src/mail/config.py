@@ -1,5 +1,5 @@
 """
-Email configuration for Resend API.
+Email configuration for Resend API and Mailtrap (for admin emails).
 """
 import os
 from typing import Dict, Any
@@ -38,6 +38,9 @@ def get_email_config() -> Dict[str, Any]:
         "api_key": api_key,
         "from_email": from_email,
         "from_name": os.getenv("RESEND_FROM_NAME", "Time Card Automation"),
-        "admin_email": os.getenv("ADMIN_EMAIL")  # Optional: admin email for alerts
+        "admin_email": os.getenv("ADMIN_EMAIL"),  # Optional: admin email for alerts
+        "mailtrap_token": os.getenv("MAILTRAP_API_TOKEN"),  # Optional: Mailtrap API token for admin emails
+        "mailtrap_from_email": os.getenv("MAILTRAP_FROM_EMAIL", "hello@admin.llued.com"),  # Optional: Mailtrap sender email
+        "mailtrap_from_name": os.getenv("MAILTRAP_FROM_NAME", "Time Card Automation")  # Optional: Mailtrap sender name
     }
 
