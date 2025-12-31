@@ -16,6 +16,9 @@ import traceback
 from datetime import datetime, timedelta, timezone
 import hashlib
 from playwright.sync_api import sync_playwright
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from .config import get_api_config
 from config import get_app_config
 from db.database import init_db, get_db, get_engine
@@ -39,6 +42,38 @@ api_config = get_api_config()
 
 # Initialize Jinja2 templates
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
+
+# Initialize rate limiter with separate Redis instance/database (isolated from Celery)
+# Use RATE_LIMIT_REDIS_URL if provided, otherwise fall back to in-memory
+# This prevents attackers from accessing Celery if they compromise rate limiting Redis
+rate_limit_redis_url = os.getenv("RATE_LIMIT_REDIS_URL")
+if rate_limit_redis_url:
+    try:
+        limiter = Limiter(
+            key_func=get_remote_address,
+            storage_uri=rate_limit_redis_url,
+            default_limits=["200/hour", "50/minute"]
+        )
+        logger.info("Rate limiter initialized with dedicated Redis backend (isolated from Celery)")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Redis-backed rate limiter: {e}. Using in-memory fallback.")
+        limiter = Limiter(
+            key_func=get_remote_address,
+            default_limits=["200/hour", "50/minute"]
+        )
+        logger.warning("WARNING: Using in-memory rate limiting. This will NOT work correctly with multiple web instances!")
+else:
+    # Fallback to in-memory storage if dedicated Redis not available
+    # WARNING: This won't work correctly if Railway scales to multiple web instances
+    limiter = Limiter(
+        key_func=get_remote_address,
+        default_limits=["200/hour", "50/minute"]
+    )
+    logger.warning(
+        "Rate limiter initialized with in-memory storage. "
+        "This will NOT work correctly with multiple web instances. "
+        "Set RATE_LIMIT_REDIS_URL for proper multi-instance support."
+    )
 
 
 async def validate_timecard_login(username: str, password: str) -> tuple[bool, str]:
@@ -149,6 +184,10 @@ else:
         lifespan=lifespan,
     )
 
+# Add rate limiter to app
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # Internal route protection
 def get_internal_secret() -> Optional[str]:
     """Get the internal secret from environment variable."""
@@ -247,8 +286,10 @@ class CredentialsResponse(BaseModel):
 # TODO: Will make this Railway Console CLI script in the future to create a magic link for a user.
 # Also need to make sure that the toke is hashed and not storing the raw token in the db
 @app.post("/api/magic-link", response_model=MagicLinkResponse)
+@limiter.limit("20/hour")  # Limit magic link creation
 async def create_magic_link(
-    request: MagicLinkRequest,
+    request: Request,
+    magic_link_request: MagicLinkRequest,
     db: Session = Depends(get_db)
 ):
     """
@@ -268,7 +309,7 @@ async def create_magic_link(
         # Create magic link record
         magic_link = MagicLink(
             token=hashed_token,
-            email=request.email,
+            email=magic_link_request.email,
             expires_at=expires_at,
             used=False
         )
@@ -281,14 +322,14 @@ async def create_magic_link(
         backend_url = os.getenv("BACKEND_URL", os.getenv("API_URL", "http://localhost:8000"))
         link = f"{backend_url}/api/validate-magic-link?token={token}"
         
-        logger.info(f"Magic link created: email={request.email}, expires_at={expires_at}")
+        logger.info(f"Magic link created: email={magic_link_request.email}, expires_at={expires_at}")
         
         # Send email with magic link
         email_sent = False
         email_service = None
         try:
             email_service = EmailService()
-            email_sent = email_service.send_magic_link(request.email, link)
+            email_sent = email_service.send_magic_link(magic_link_request.email, link)
         except ImportError:
             logger.warning("Resend package not available. Email not sent.")
             # Try to send admin alert
@@ -335,7 +376,7 @@ async def create_magic_link(
             email_service = EmailService()
             email_service.send_admin_alert(
                 "Magic Link Creation Failed",
-                f"Failed to create magic link for email: {request.email}",
+                f"Failed to create magic link for email: {magic_link_request.email}",
                 error_traceback
             )
         except Exception as alert_error:
@@ -349,7 +390,9 @@ async def create_magic_link(
 
 # Public API endpoint to validate magic link and set cookie
 @app.get("/api/validate-magic-link")
+@limiter.limit("10/hour")  # Limit magic link validation attempts
 async def validate_magic_link(
+    request: Request,
     token: str = Query(..., description="Magic link token"),
     db: Session = Depends(get_db)
 ):
@@ -448,6 +491,7 @@ def verify_credentials_cookie_dependency(request: Request) -> str:
 
 # Public endpoint to render credentials form (protected by cookie)
 @app.get("/form", response_class=HTMLResponse)
+@limiter.limit("30/hour")  # Limit form access
 async def get_credentials_form(
     request: Request,
     email: str = Depends(verify_credentials_cookie_dependency)
@@ -461,6 +505,7 @@ async def get_credentials_form(
 
 # Public endpoint to submit credentials (protected by cookie)
 @app.post("/api/submit-credentials", response_class=HTMLResponse)
+@limiter.limit("5/hour")  # Strict limit on credential submissions
 async def submit_credentials(
     request: Request,
     email: str = Depends(verify_credentials_cookie_dependency),
@@ -469,7 +514,15 @@ async def submit_credentials(
     """
     Submit user information and encrypted credentials. Protected by cookie authentication.
     Creates or updates User record with user info, then encrypts and stores credentials.
+    Rate limited to 5 submissions per hour per IP address.
     """
+    # Audit logging for credential updates
+    client_ip = get_remote_address(request)
+    user_agent = request.headers.get("user-agent", "Unknown")
+    logger.info(
+        f"CREDENTIAL_UPDATE_ATTEMPT: email={email}, ip={client_ip}, "
+        f"user_agent={user_agent}, timestamp={datetime.now(timezone.utc).isoformat()}"
+    )
     # Parse form data
     form_data = await request.form()
     try:
@@ -603,6 +656,7 @@ async def submit_credentials(
             Credential.site == "timecard_portal"
         ).first()
         
+        credential_id = None
         if existing_credential:
             # Update existing credential
             existing_credential.enc_username = enc_username
@@ -613,7 +667,7 @@ async def submit_credentials(
             existing_credential.kms_key_id = kms_key_id
             existing_credential.dek_version = existing_credential.dek_version + 1
             existing_credential.updated_at = datetime.now(timezone.utc)
-            
+            credential_id = existing_credential.id
             logger.info(f"Updated credentials for user: {email}")
         else:
             # Create new credential record
@@ -630,12 +684,32 @@ async def submit_credentials(
                 dek_version=1
             )
             db.add(credential)
+            db.flush()  # Flush to get the credential ID
+            credential_id = credential.id
             logger.info(f"Created new credentials for user: {email}")
         
         # Update user's needs_password flag
         user.needs_password = False
         
         db.commit()
+        
+        # Audit log successful credential update
+        logger.info(
+            f"CREDENTIAL_UPDATE_SUCCESS: email={email}, ip={client_ip}, "
+            f"user_id={user.user_id}, credential_id={credential_id}, "
+            f"timestamp={datetime.now(timezone.utc).isoformat()}"
+        )
+        
+        # Send admin alert about credential update
+        try:
+            email_service = EmailService()
+            email_service.send_admin_alert(
+                "Credential Update",
+                f"User {email} updated their credentials",
+                f"Email: {email}\nIP: {client_ip}\nUser Agent: {user_agent}\nTime: {datetime.now(timezone.utc).isoformat()}\nUser ID: {user.user_id}"
+            )
+        except Exception as alert_error:
+            logger.error(f"Failed to send admin alert for credential update: {alert_error}")
         
         return templates.TemplateResponse(
             "success.html",
