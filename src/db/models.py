@@ -48,6 +48,12 @@ class TimecardRunStatus(str, enum.Enum):
     LOGIN_FAILED_UNKNOWN_ERROR = "login_failed_unknown_error"
 
 
+class MagicLinkType(str, enum.Enum):
+    """Type of magic link."""
+    CREDENTIALS = "credentials"
+    DELETION = "deletion"
+
+
 class MagicLink(Base):
     """Magic link for email-based authentication."""
     __tablename__ = "magic_links"
@@ -55,6 +61,9 @@ class MagicLink(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     token: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    link_type: Mapped[MagicLinkType] = mapped_column(
+        Enum(MagicLinkType), nullable=False, default=MagicLinkType.CREDENTIALS, index=True
+    )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

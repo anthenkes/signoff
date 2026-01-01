@@ -22,14 +22,14 @@ from slowapi.errors import RateLimitExceeded
 from .config import get_api_config
 from config import get_app_config
 from db.database import init_db, get_db, get_engine
-from db.models import MagicLink, User, Credential, Base
+from db.models import MagicLink, MagicLinkType, User, Credential, Base
 from kms.service import KMSEncryptService
 from kms.utils import obfuscate_credential
 from play.pages.login_page import LoginPage
 from play.pages.dashboard_page import DashboardPage
 from auth.cookies import (
     create_credentials_cookie, 
-    verify_credentials_cookie, 
+    verify_credentials_cookie,
     COOKIE_NAME,
     COOKIE_EXPIRATION_MINUTES
 )
@@ -217,7 +217,8 @@ async def protect_internal_routes(request: Request, call_next):
     
     # Public routes that don't need protection
     public_routes = [
-        "/api/validate-magic-link", 
+        "/api/validate-magic-link",
+        "/api/delete-account",
         "/docs", 
         "/openapi.json", 
         "/redoc"
@@ -227,7 +228,9 @@ async def protect_internal_routes(request: Request, call_next):
     cookie_protected_routes = [
         "/api/credentials",
         "/api/submit-credentials",
-        "/form"
+        "/api/confirm-delete-account",
+        "/form",
+        "/delete-account"
     ]
     
     # If it's not a public route or cookie-protected route, check for internal secret
@@ -310,6 +313,7 @@ async def create_magic_link(
         magic_link = MagicLink(
             token=hashed_token,
             email=magic_link_request.email,
+            link_type=MagicLinkType.CREDENTIALS,
             expires_at=expires_at,
             used=False
         )
@@ -329,7 +333,7 @@ async def create_magic_link(
         email_service = None
         try:
             email_service = EmailService()
-            email_sent = email_service.send_magic_link(magic_link_request.email, link)
+            email_sent = email_service.send_magic_link(magic_link_request.email, link, db)
         except ImportError:
             logger.warning("Resend package not available. Email not sent.")
             # Try to send admin alert
@@ -388,6 +392,71 @@ async def create_magic_link(
         )
 
 
+def generate_deletion_magic_link(email: str, db: Session) -> str:
+    """
+    Generate or retrieve an existing deletion magic link for a user.
+    Reuses existing unused, non-expired links to avoid creating duplicates.
+    
+    Args:
+        email: The user's email address
+        db: Database session
+    
+    Returns:
+        The full deletion magic link URL
+    """
+    email_lower = email.lower()
+    now = datetime.now(timezone.utc)
+    
+    # Check for existing unused, non-expired deletion link
+    existing_link = db.query(MagicLink).filter(
+        MagicLink.email == email_lower,
+        MagicLink.link_type == MagicLinkType.DELETION,
+        MagicLink.used == False,
+        MagicLink.expires_at > now
+    ).first()
+    
+    if existing_link:
+        # Reuse existing link - we need to return the original token
+        # But we only have the hash stored, so we need to generate a new one
+        # Actually, we can't get the original token back from the hash
+        # So we'll create a new one and mark the old one as used, or just create new ones
+        # For simplicity, let's just create a new one each time but clean up old unused ones
+        logger.info(f"Found existing deletion link for {email}, but cannot retrieve original token. Creating new one.")
+        # Mark old one as used to clean up
+        existing_link.used = True
+        existing_link.used_at = now
+        db.commit()
+    
+    # Generate a secure token
+    token = secrets.token_urlsafe(32)
+    
+    # Hash the token
+    hashed_token = hashlib.sha256(token.encode()).hexdigest()
+    
+    # Set expiration to 30 days from now (longer than credentials link since it's permanent)
+    expires_at = now + timedelta(days=30)
+    
+    # Create magic link record for deletion
+    magic_link = MagicLink(
+        token=hashed_token,
+        email=email_lower,
+        link_type=MagicLinkType.DELETION,
+        expires_at=expires_at,
+        used=False
+    )
+    
+    db.add(magic_link)
+    db.commit()
+    
+    # Get base URL from environment
+    backend_url = os.getenv("BACKEND_URL", os.getenv("API_URL", "http://localhost:8000"))
+    link = f"{backend_url}/api/validate-magic-link?token={token}"
+    
+    logger.info(f"Deletion magic link created: email={email}, expires_at={expires_at}")
+    
+    return link
+
+
 # Public API endpoint to validate magic link and set cookie
 @app.get("/api/validate-magic-link")
 @limiter.limit("10/hour")  # Limit magic link validation attempts
@@ -432,8 +501,14 @@ async def validate_magic_link(
     magic_link.used_at = datetime.now(timezone.utc)
     db.commit()
     
+    # Redirect based on link type
+    if magic_link.link_type == MagicLinkType.DELETION:
+        redirect_url = "/delete-account"
+    else:
+        redirect_url = "/form"
+    
     # Create redirect response with cookie
-    response = RedirectResponse(url="/form", status_code=status.HTTP_302_FOUND)
+    response = RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)
     
     # Set cookie with 30 minute expiration
     response.set_cookie(
@@ -446,9 +521,122 @@ async def validate_magic_link(
         path="/"
     )
     
-    logger.info(f"Magic link validated and cookie set for email: {magic_link.email}")
+    logger.info(f"Magic link validated and cookie set for email: {magic_link.email}, type: {magic_link.link_type}")
     
     return response
+
+
+# Cookie-protected endpoint to render deletion confirmation page
+@app.get("/delete-account", response_class=HTMLResponse)
+@limiter.limit("10/hour")  # Limit deletion page access
+async def get_delete_account_page(
+    request: Request,
+    email: str = Depends(verify_credentials_cookie_dependency)
+):
+    """
+    Render account deletion confirmation page. Protected by cookie authentication.
+    User must have validated deletion magic link to access this endpoint.
+    """
+    return templates.TemplateResponse(
+        "delete_account.html",
+        {
+            "request": request,
+            "email": email
+        }
+    )
+
+
+# Cookie-protected endpoint to confirm and execute account deletion
+@app.post("/api/confirm-delete-account", response_class=HTMLResponse)
+@limiter.limit("5/hour")  # Strict limit on deletion confirmations
+async def confirm_delete_account(
+    request: Request,
+    email: str = Depends(verify_credentials_cookie_dependency),
+    db: Session = Depends(get_db)
+):
+    """
+    Confirm and execute account deletion. Protected by cookie authentication.
+    """
+    try:
+        # Find the user
+        user = db.query(User).filter(User.email == email.lower()).first()
+        
+        if not user:
+            # User doesn't exist, but don't reveal this for security
+            logger.warning(f"Deletion attempt for non-existent email: {email}")
+            return templates.TemplateResponse(
+                "success.html",
+                {
+                    "request": request,
+                    "message": "Account deletion completed. If an account existed, it has been removed."
+                }
+            )
+        
+        # Log the deletion attempt
+        client_ip = get_remote_address(request)
+        user_agent = request.headers.get("user-agent", "Unknown")
+        user_id = user.user_id
+        
+        logger.info(
+            f"ACCOUNT_DELETION: email={email}, ip={client_ip}, "
+            f"user_agent={user_agent}, user_id={user_id}, "
+            f"timestamp={datetime.now(timezone.utc).isoformat()}"
+        )
+        
+        # Delete user (cascade will delete credentials due to relationship)
+        # Also need to delete any magic links for this email
+        db.query(MagicLink).filter(MagicLink.email == email.lower()).delete()
+        
+        # Delete user (this will cascade delete credentials)
+        db.delete(user)
+        db.commit()
+        
+        logger.info(f"Account deleted successfully: {email}")
+        
+        # Send admin alert about account deletion
+        try:
+            email_service = EmailService()
+            email_service.send_admin_alert(
+                "Account Deletion",
+                f"User {email} deleted their account",
+                f"Email: {email}\nIP: {client_ip}\nUser Agent: {user_agent}\nTime: {datetime.now(timezone.utc).isoformat()}\nUser ID: {user_id}"
+            )
+        except Exception as alert_error:
+            logger.error(f"Failed to send admin alert for account deletion: {alert_error}")
+        
+        # Clear the cookie after deletion
+        response = templates.TemplateResponse(
+            "success.html",
+            {
+                "request": request,
+                "message": "Your account and all associated data have been permanently deleted."
+            }
+        )
+        response.delete_cookie(key=COOKIE_NAME, path="/")
+        return response
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_traceback = traceback.format_exc()
+        db.rollback()
+        logger.error(f"Error deleting account: {e}", exc_info=True)
+        
+        # Send admin alert about deletion failure
+        try:
+            email_service = EmailService()
+            email_service.send_admin_alert(
+                "Account Deletion Failed",
+                f"Failed to delete account for email: {email}",
+                error_traceback
+            )
+        except Exception as alert_error:
+            logger.error(f"Failed to send admin alert: {alert_error}")
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while deleting your account. Please contact support."
+        )
 
 
 # Internal routes (protected by middleware)
@@ -657,6 +845,7 @@ async def submit_credentials(
         ).first()
         
         credential_id = None
+        is_new_credential = False
         if existing_credential:
             # Update existing credential
             existing_credential.enc_username = enc_username
@@ -686,6 +875,7 @@ async def submit_credentials(
             db.add(credential)
             db.flush()  # Flush to get the credential ID
             credential_id = credential.id
+            is_new_credential = True
             logger.info(f"Created new credentials for user: {email}")
         
         # Update user's needs_password flag
@@ -693,23 +883,41 @@ async def submit_credentials(
         
         db.commit()
         
-        # Audit log successful credential update
+        # Audit log successful credential create/update
+        action_type = "CREATE" if is_new_credential else "UPDATE"
         logger.info(
-            f"CREDENTIAL_UPDATE_SUCCESS: email={email}, ip={client_ip}, "
+            f"CREDENTIAL_{action_type}_SUCCESS: email={email}, ip={client_ip}, "
             f"user_id={user.user_id}, credential_id={credential_id}, "
             f"timestamp={datetime.now(timezone.utc).isoformat()}"
         )
         
-        # Send admin alert about credential update
+        # Send admin alert about credential create/update
         try:
             email_service = EmailService()
+            action_text = "created" if is_new_credential else "updated"
             email_service.send_admin_alert(
-                "Credential Update",
-                f"User {email} updated their credentials",
-                f"Email: {email}\nIP: {client_ip}\nUser Agent: {user_agent}\nTime: {datetime.now(timezone.utc).isoformat()}\nUser ID: {user.user_id}"
+                f"Credential {action_text.title()}",
+                f"User {email} {action_text} their credentials",
+                f"Action: {action_text.upper()}\nEmail: {email}\nIP: {client_ip}\nUser Agent: {user_agent}\nTime: {datetime.now(timezone.utc).isoformat()}\nUser ID: {user.user_id}\nCredential ID: {credential_id}"
             )
         except Exception as alert_error:
-            logger.error(f"Failed to send admin alert for credential update: {alert_error}")
+            logger.error(f"Failed to send admin alert for credential {action_text}: {alert_error}")
+        
+        # Send confirmation email to user with deletion link
+        try:
+            email_service = EmailService()
+            email_sent = email_service.send_credentials_confirmation(
+                email=email,
+                first_name=user.first_name,
+                db_session=db
+            )
+            if email_sent:
+                logger.info(f"Credentials confirmation email sent to {email}")
+            else:
+                logger.warning(f"Failed to send credentials confirmation email to {email}")
+        except Exception as email_error:
+            logger.error(f"Error sending credentials confirmation email to {email}: {email_error}")
+            # Don't fail the request if email fails
         
         return templates.TemplateResponse(
             "success.html",

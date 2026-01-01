@@ -245,7 +245,7 @@ def signoff_user_timecard(user_id: int):
                 if EMAIL_SERVICE_AVAILABLE and result.success:
                     try:
                         email_service = EmailService()
-                        email_service.send_signoff_result(result)
+                        email_service.send_signoff_result(result, db)
                         logger.info(f"Email notification sent to {user.email}")
                     except Exception as email_error:
                         logger.error(f"Failed to send email notification to {user.email}: {email_error}")

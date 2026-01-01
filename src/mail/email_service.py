@@ -4,7 +4,9 @@ Admin emails are sent via Mailtrap.
 """
 import logging
 import base64
+import os
 from typing import List, Optional
+from sqlalchemy.orm import Session
 from signoff_models import SignoffResult, SignoffUser
 from mail.config import get_email_config
 from storage import get_bucket_service
@@ -40,21 +42,46 @@ class EmailService:
         self.from_email = email_config["from_email"]
         self.from_name = email_config.get("from_name", "Time Card Automation")  # type: ignore
 
-    def send_signoff_result(self, result: SignoffResult) -> bool:
+    def _get_deletion_link(self, email: str, db_session: Optional[Session] = None) -> Optional[str]:
+        """
+        Generate a deletion magic link for a user (same pattern as credentials magic link).
+        The link is stored in the database.
+        
+        Args:
+            email: The user's email address
+            db_session: Database session (optional - if None, returns None and logs warning)
+        
+        Returns:
+            The full URL for account deletion, or None if db_session is not provided
+        """
+        if db_session is None:
+            logger.warning(f"Cannot generate deletion link for {email}: database session not available")
+            return None
+        
+        # Import here to avoid circular imports
+        from endpoints.main import generate_deletion_magic_link
+        try:
+            return generate_deletion_magic_link(email, db_session)
+        except Exception as e:
+            logger.error(f"Failed to generate deletion magic link for {email}: {e}")
+            return None
+
+    def send_signoff_result(self, result: SignoffResult, db_session: Optional[Session] = None) -> bool:
         """
         Send email to user with their sign-off result.
         
         Args:
             result: The SignoffResult object containing sign-off information
+            db_session: Database session (optional - deletion link will be omitted if not provided)
         
         Returns:
             True if email sent successfully, False otherwise
         """
         try:
             if result.success:
-                subject, html_content = self.format_success_email(result)
+                subject, html_content = self.format_success_email(result, db_session)
             else:
-                subject, html_content = self.format_error_email(result)
+                subject, html_content = self.format_error_email(result, db_session)
             
             params: resend.Emails.SendParams = {
                 "from": f"{self.from_name} <{self.from_email}>",
@@ -111,18 +138,20 @@ class EmailService:
             logger.error(f"Error sending email to {result.user.email}: {e}")
             return False
 
-    def format_success_email(self, result: SignoffResult) -> tuple[str, str]:
+    def format_success_email(self, result: SignoffResult, db_session: Optional[Session] = None) -> tuple[str, str]:
         """
         Format email template for successful sign-off.
         
         Args:
             result: The SignoffResult object
+            db_session: Database session (optional - deletion link will be omitted if not provided)
         
         Returns:
             Tuple of (subject, html_content)
         """
         user_name = result.user.name or result.user.username
         timestamp = result.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        deletion_link = self._get_deletion_link(result.user.email, db_session)
         
         subject = f"Time Card Sign-Off Successful - {timestamp}"
         
@@ -138,27 +167,31 @@ class EmailService:
                 <p><strong>Status:</strong> <span style="color: #28a745;">Success</span></p>
             </div>
             <p>{result.message}</p>
+            <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
             <p style="margin-top: 30px; color: #666; font-size: 0.9em;">
                 This is an automated message from the Time Card Sign-Off system.
             </p>
+            {f'<p style="margin-top: 20px; color: #666; font-size: 0.85em;"><a href="{deletion_link}" style="color: #dc3545; text-decoration: none;">Delete my account</a> - If you no longer wish to use this service, you can permanently delete your account using this link.</p>' if deletion_link else ''}
         </body>
         </html>
         """
         
         return subject, html_content
 
-    def format_error_email(self, result: SignoffResult) -> tuple[str, str]:
+    def format_error_email(self, result: SignoffResult, db_session: Optional[Session] = None) -> tuple[str, str]:
         """
         Format email template for failed sign-off.
         
         Args:
             result: The SignoffResult object
+            db_session: Database session (optional - deletion link will be omitted if not provided)
         
         Returns:
             Tuple of (subject, html_content)
         """
         user_name = result.user.name or result.user.username
         timestamp = result.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        deletion_link = self._get_deletion_link(result.user.email, db_session)
         
         subject = f"Time Card Sign-Off Failed - {timestamp}"
         
@@ -180,9 +213,11 @@ class EmailService:
                 <p>{error_details}</p>
             </div>
             <p>Please try signing off manually or contact support if the issue persists.</p>
+            <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
             <p style="margin-top: 30px; color: #666; font-size: 0.9em;">
                 This is an automated message from the Time Card Sign-Off system.
             </p>
+            {f'<p style="margin-top: 20px; color: #666; font-size: 0.85em;"><a href="{deletion_link}" style="color: #dc3545; text-decoration: none;">Delete my account</a> - If you no longer wish to use this service, you can permanently delete your account using this link.</p>' if deletion_link else ''}
         </body>
         </html>
         """
@@ -251,18 +286,20 @@ class EmailService:
         
         return subject, html_content
 
-    def send_magic_link(self, email: str, magic_link: str) -> bool:
+    def send_magic_link(self, email: str, magic_link: str, db_session: Optional[Session] = None) -> bool:
         """
         Send magic link email to user for credentials setup.
         
         Args:
             email: The recipient's email address
             magic_link: The full URL of the magic link
+            db_session: Database session (optional - deletion link will be omitted if not provided)
         
         Returns:
             True if email sent successfully, False otherwise
         """
         try:
+            deletion_link = self._get_deletion_link(email, db_session)
             subject = "Complete Your Time Card Credentials Setup"
             html_content = f"""
             <html>
@@ -282,6 +319,7 @@ class EmailService:
                     <p style="color: #666; font-size: 0.9em; margin-top: 20px;">
                         If you did not request this link, please ignore this email.
                     </p>
+                    {f'<hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;"><p style="margin-top: 20px; color: #666; font-size: 0.85em;"><a href="{deletion_link}" style="color: #dc3545; text-decoration: none;">Delete my account</a> - If you no longer wish to use this service, you can permanently delete your account using this link.</p>' if deletion_link else ''}
                 </div>
             </body>
             </html>
@@ -300,6 +338,60 @@ class EmailService:
             return True
         except Exception as e:
             logger.error(f"Error sending magic link email to {email}: {e}")
+            return False
+
+    def send_credentials_confirmation(self, email: str, first_name: Optional[str] = None, db_session: Optional[Session] = None) -> bool:
+        """
+        Send confirmation email to user after credentials are successfully saved.
+        
+        Args:
+            email: The recipient's email address
+            first_name: Optional first name for personalization
+            db_session: Database session (optional - deletion link will be omitted if not provided)
+        
+        Returns:
+            True if email sent successfully, False otherwise
+        """
+        try:
+            deletion_link = self._get_deletion_link(email, db_session)
+            user_name = first_name or "there"
+            subject = "Time Card Credentials Successfully Saved"
+            
+            html_content = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #28a745;">✓ Credentials Saved Successfully</h2>
+                    <p>Hello {user_name},</p>
+                    <p>Your time card credentials have been successfully saved and encrypted.</p>
+                    <p>Your account is now set up and ready for automated time card sign-off.</p>
+                    <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                        <p style="margin: 0;"><strong>What's next?</strong></p>
+                        <ul style="margin: 10px 0 0 20px;">
+                            <li>Your credentials are securely encrypted and stored</li>
+                            <li>Automated time card sign-off will begin on the next scheduled run</li>
+                            <li>You'll receive email notifications for each sign-off attempt</li>
+                        </ul>
+                    </div>
+                    {f'<hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;"><p style="margin-top: 20px; color: #666; font-size: 0.85em;"><a href="{deletion_link}" style="color: #dc3545; text-decoration: none;">Delete my account</a> - If you no longer wish to use this service, you can permanently delete your account using this link.</p>' if deletion_link else ''}
+                </div>
+            </body>
+            </html>
+            """
+            
+            params: resend.Emails.SendParams = {
+                "from": f"{self.from_name} <{self.from_email}>",
+                "to": [email],
+                "subject": subject,
+                "html": html_content
+            }
+            
+            email_result = resend.Emails.send(params)
+            email_id = email_result.get("id", "unknown")
+            logger.info(f"Credentials confirmation email sent successfully to {email}. Email ID: {email_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error sending credentials confirmation email to {email}: {e}")
             return False
 
     def send_admin_alert(self, subject: str, message: str, error_details: Optional[str] = None) -> bool:
