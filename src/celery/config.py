@@ -102,11 +102,6 @@ def get_celery_config() -> Dict[str, Any]:
                 'task': 'src.celery.tasks.enqueue_all_signoffs_if_needed',
                 'schedule': crontab(minute=30, hour=8, day_of_week='sun'),
             },
-            # TEST TASK: Remove this after verifying beat is working
-            'test-beat-working': {
-                'task': 'src.celery.tasks.test_beat_working',
-                'schedule': timedelta(minutes=1),  # Runs every 1 minute for testing
-            },
         },
     }
     
