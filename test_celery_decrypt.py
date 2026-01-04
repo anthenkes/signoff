@@ -50,7 +50,7 @@ def test_decrypt_celery():
     print(f"Testing Celery task for: {email}")
     print("=" * 50)
     print("Note: This requires a Celery worker to be running.")
-    print("Start worker with: python run_celery.py")
+    print("Start worker with: celery -A src.celery worker -l INFO -Q signoffs -c 1")
     print()
     
     try:
@@ -75,7 +75,7 @@ def test_decrypt_celery():
     except Exception as e:
         print(f"✗ Error calling Celery task: {e}")
         print("\nMake sure:")
-        print("  1. Celery worker is running: python run_celery.py")
+        print("  1. Celery worker is running: celery -A src.celery worker -l INFO -Q signoffs -c 1")
         print("  2. Redis is running")
         print("  3. Database is accessible")
         import traceback

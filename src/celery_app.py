@@ -1,4 +1,3 @@
 # src/celery_app.py
-from celery import celery_app as _celery_app
-
-celery_app = _celery_app
+# Import celery_app from the celery package
+from src.celery import celery_app

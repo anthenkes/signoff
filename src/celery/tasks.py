@@ -65,7 +65,7 @@ def categorize_error_status(error_message: str, error_type: str | None = None) -
     return TimecardRunStatus.LOGIN_FAILED_UNKNOWN_ERROR
 
 
-@celery_app.task
+@celery_app.task(name="src.celery.tasks.signoff_user_timecard")
 def signoff_user_timecard(user_id: int):
     """Do the actual signoff for one user."""
     db = SessionLocal()
@@ -291,12 +291,13 @@ def signoff_user_timecard(user_id: int):
         db.close()
 
 
-@celery_app.task
+@celery_app.task(name="src.celery.tasks.enqueue_all_signoffs_if_needed")
 def enqueue_all_signoffs_if_needed():
     """
-    Runs on a schedule (e.g., weekly).
-    If it's a 'signoff Sunday', enqueue signoff jobs for all eligible users.
+    Runs on a schedule (every Sunday at 8:30am America/Los_Angeles).
+    If it's a 'signoff Sunday' (bi-weekly), enqueue signoff jobs for all eligible users.
     """
+    logger.info("enqueue_all_signoffs_if_needed task started (scheduled by Celery Beat)")
     if not is_bi_weekly_sunday():
         logger.info("Not a signoff Sunday, skipping enqueue")
         return
@@ -341,7 +342,8 @@ def enqueue_all_signoffs_if_needed():
 
         logger.info(f"Enqueuing signoff tasks for {len(eligible_users)} eligible users")
         for user in eligible_users:
-            signoff_user_timecard.delay(user.id)
+            async_result = signoff_user_timecard.delay(user.id)
+            logger.info(f"Enqueued signoff_user_timecard for user={user.id} (email={user.email}) task_id={async_result.id}")
 
     except Exception as e:
         logger.error(f"Error in enqueue_all_signoffs_if_needed: {e}", exc_info=True)

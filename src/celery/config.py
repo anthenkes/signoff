@@ -4,6 +4,7 @@ Celery configuration for background task processing.
 import os
 import logging
 from typing import Dict, Any
+from celery.schedules import crontab
 
 # Try to load python-dotenv if available
 try:
@@ -49,9 +50,9 @@ def get_celery_config() -> Dict[str, Any]:
         'accept_content': ['json'],
         'result_serializer': 'json',
         
-        # Timezone
-        'timezone': 'UTC',
-        'enable_utc': True,
+        # Timezone - use America/Los_Angeles for scheduled tasks
+        'timezone': 'America/Los_Angeles',
+        'enable_utc': False,  # Use local timezone, not UTC
         
         # Task acknowledgment
         'task_acks_late': True,  # Acknowledge tasks after execution
@@ -93,12 +94,21 @@ def get_celery_config() -> Dict[str, Any]:
         'imports': (
             'src.celery.tasks',
         ),
+        
+        # Beat schedule - periodic tasks
+        'beat_schedule': {
+            'enqueue-signoffs-weekly-sun-0830': {
+                'task': 'src.celery.tasks.enqueue_all_signoffs_if_needed',
+                'schedule': crontab(minute=30, hour=8, day_of_week='sun'),
+            },
+        },
     }
     
     logger.info("Celery configuration loaded")
     logger.info(f"Broker: Redis at {redis_url.split('@')[-1] if '@' in redis_url else 'configured'}")
     logger.info(f"Result backend: None (disabled)")
-    logger.info(f"Timezone: UTC")
+    logger.info(f"Timezone: America/Los_Angeles (enable_utc=False)")
     logger.info(f"Worker concurrency: {worker_concurrency}")
+    logger.info(f"Beat schedule: enqueue-signoffs-weekly-sun-0830 (Sunday 8:30am LA time)")
     
     return config
