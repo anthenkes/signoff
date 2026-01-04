@@ -105,7 +105,7 @@ def get_celery_config() -> Dict[str, Any]:
             # TEST TASK: Remove this after verifying beat is working
             'test-beat-working': {
                 'task': 'src.celery.tasks.test_beat_working',
-                'schedule': timedelta(minutes=5),  # Runs every 5 minutes for testing
+                'schedule': timedelta(minutes=1),  # Runs every 1 minute for testing
             },
         },
     }
