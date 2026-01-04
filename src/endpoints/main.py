@@ -531,7 +531,7 @@ async def validate_magic_link(
 @limiter.limit("10/hour")  # Limit deletion page access
 async def get_delete_account_page(
     request: Request,
-    email: str = Depends(verify_credentials_cookie_dependency)
+    email: str = Depends(verify_credentials_cookie)
 ):
     """
     Render account deletion confirmation page. Protected by cookie authentication.
@@ -551,7 +551,7 @@ async def get_delete_account_page(
 @limiter.limit("5/hour")  # Strict limit on deletion confirmations
 async def confirm_delete_account(
     request: Request,
-    email: str = Depends(verify_credentials_cookie_dependency),
+    email: str = Depends(verify_credentials_cookie),
     db: Session = Depends(get_db)
 ):
     """
