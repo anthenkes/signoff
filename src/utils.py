@@ -84,6 +84,8 @@ def is_bi_weekly_sunday() -> bool:
     if today is a Sunday and falls exactly on a 2-week interval from that
     anchor date (i.e., 0, 2, 4, 6... weeks from anchor).
     
+    Uses America/Los_Angeles timezone to handle DST correctly.
+    
     Examples:
         - December 21, 2025 (anchor): True
         - January 4, 2026 (2 weeks later): True
@@ -93,10 +95,17 @@ def is_bi_weekly_sunday() -> bool:
     Returns:
         True if today is a bi-weekly Sunday, False otherwise
     """
+    from zoneinfo import ZoneInfo
+    
+    # Use Los Angeles timezone to handle DST correctly
+    LA = ZoneInfo("America/Los_Angeles")
+    
     # Anchor date: December 21, 2025 (a Sunday)
     anchor_date = datetime(2025, 12, 21).date()
     
-    today = datetime.now().date()
+    # Get current date in LA timezone
+    now = datetime.now(LA)
+    today = now.date()
     
     # Check if today is Sunday (0 = Monday, 6 = Sunday)
     if today.weekday() != 6:  # Not Sunday
