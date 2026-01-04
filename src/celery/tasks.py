@@ -4,7 +4,7 @@ from playwright.sync_api import sync_playwright
 from . import celery_app
 from src.db import SessionLocal  # SQLAlchemy session
 from src.db.models import User, TimecardRunStatus, TimecardRun, Credential  # SQLAlchemy models
-from kms.credentials import get_user_credentials_for_signoff
+from src.kms.credentials import get_user_credentials_for_signoff
 from src.signoff_models import SignoffUser  # Dataclass for signoff automation workflow
 from src.signoff_timecard import sign_off_for_user
 from src.config import get_app_config
