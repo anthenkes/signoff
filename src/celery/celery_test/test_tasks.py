@@ -4,9 +4,9 @@ These tasks do NOT run signoff automation - only test infrastructure.
 """
 import logging
 from .. import celery_app
-from db import SessionLocal
-from db.models import User
-from kms.credentials import decrypt_user_credentials
+from src.db import SessionLocal
+from src.db.models import User
+from src.kms.credentials import decrypt_user_credentials
 
 logger = logging.getLogger(__name__)
 

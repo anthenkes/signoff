@@ -5,7 +5,7 @@ Encapsulates all interactions with the login page.
 from playwright.sync_api import Page, Locator
 from typing import Literal
 
-from play.pages.base_page import BasePage
+from src.play.pages.base_page import BasePage
 
 
 class LoginPage(BasePage):

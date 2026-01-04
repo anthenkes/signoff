@@ -3,7 +3,7 @@ Page Object Model for API Healthcare Dashboard Page.
 Encapsulates all interactions with the dashboard page.
 """
 from playwright.sync_api import Page, Locator
-from play.pages.base_page import BasePage
+from src.play.pages.base_page import BasePage
 import logging
 
 logger = logging.getLogger(__name__)

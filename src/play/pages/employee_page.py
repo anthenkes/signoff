@@ -6,7 +6,7 @@ from playwright.sync_api._generated import Locator
 
 
 from playwright.sync_api import Page, Locator, FrameLocator
-from play.pages.base_page import BasePage
+from src.play.pages.base_page import BasePage
 import logging
 import json
 import time

@@ -10,8 +10,8 @@ from functools import wraps
 import time
 
 if TYPE_CHECKING:
-    from signoff_models import SignoffResult, SignoffUser
-    from db.models import User as DBUser
+    from src.signoff_models import SignoffResult, SignoffUser
+    from src.db.models import User as DBUser
 
 
 class ColoredFormatter(logging.Formatter):

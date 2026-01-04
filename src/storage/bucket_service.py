@@ -8,8 +8,8 @@ from typing import Optional, Union, TYPE_CHECKING
 import base64
 
 if TYPE_CHECKING:
-    from signoff_models import SignoffUser
-    from db.models import User as DBUser
+    from src.signoff_models import SignoffUser
+    from src.db.models import User as DBUser
 
 logger = logging.getLogger(__name__)
 

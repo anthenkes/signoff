@@ -10,16 +10,16 @@ from pathlib import Path
 from datetime import datetime
 from playwright.sync_api import sync_playwright, Browser, Page
 
-from config import load_users, get_app_config, validate_config
-from signoff_models import SignoffUser, SignoffResult
-from mail.email_service import EmailService
-from utils import setup_logging, format_result_message, get_screenshot_path, get_persistent_screenshot_path
-from play.pages.login_page import LoginPage
-from play.pages.dashboard_page import DashboardPage
-from play.pages.employee_page import EmployeePage
-from play.pages.signoff_confirmation_page import SignOffConfirmationPage
-from kms.utils import obfuscate_credential
-from storage import get_bucket_service
+from src.config import load_users, get_app_config, validate_config
+from src.signoff_models import SignoffUser, SignoffResult
+from src.mail.email_service import EmailService
+from src.utils import setup_logging, format_result_message, get_screenshot_path, get_persistent_screenshot_path
+from src.play.pages.login_page import LoginPage
+from src.play.pages.dashboard_page import DashboardPage
+from src.play.pages.employee_page import EmployeePage
+from src.play.pages.signoff_confirmation_page import SignOffConfirmationPage
+from src.kms.utils import obfuscate_credential
+from src.storage import get_bucket_service
 
 logger = logging.getLogger(__name__)
 

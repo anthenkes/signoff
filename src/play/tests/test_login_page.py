@@ -10,9 +10,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from playwright.sync_api import sync_playwright
-from play.pages.login_page import LoginPage
-from config import get_app_config
-from play.tests.test_utils import (
+from src.play.pages.login_page import LoginPage
+from src.config import get_app_config
+from src.play.tests.test_utils import (
     test_element,
     test_input_field,
     test_dropdown,

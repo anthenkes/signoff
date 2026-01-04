@@ -3,7 +3,7 @@ Page Object Model for API Healthcare Sign-Off Confirmation Page.
 Encapsulates all interactions with the sign-off confirmation window.
 """
 from playwright.sync_api import Page, Locator
-from play.pages.base_page import BasePage
+from src.play.pages.base_page import BasePage
 import logging
 
 logger = logging.getLogger(__name__)

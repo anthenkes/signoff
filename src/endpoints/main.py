@@ -20,20 +20,20 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from .config import get_api_config
-from config import get_app_config
-from db.database import init_db, get_db, get_engine
-from db.models import MagicLink, MagicLinkType, User, Credential, Base
-from kms.service import KMSEncryptService
-from kms.utils import obfuscate_credential
-from play.pages.login_page import LoginPage
-from play.pages.dashboard_page import DashboardPage
-from auth.cookies import (
+from src.config import get_app_config
+from src.db.database import init_db, get_db, get_engine
+from src.db.models import MagicLink, MagicLinkType, User, Credential, Base
+from src.kms.service import KMSEncryptService
+from src.kms.utils import obfuscate_credential
+from src.play.pages.login_page import LoginPage
+from src.play.pages.dashboard_page import DashboardPage
+from src.auth.cookies import (
     create_credentials_cookie, 
     verify_credentials_cookie,
     COOKIE_NAME,
     COOKIE_EXPIRATION_MINUTES
 )
-from mail.email_service import EmailService
+from src.mail.email_service import EmailService
 
 logger = logging.getLogger(__name__)
 

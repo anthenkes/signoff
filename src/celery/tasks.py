@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # Try to import EmailService for admin alerts
 try:
-    from mail.email_service import EmailService
+    from src.mail.email_service import EmailService
     EMAIL_SERVICE_AVAILABLE = True
 except ImportError:
     EMAIL_SERVICE_AVAILABLE = False

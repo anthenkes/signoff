@@ -11,10 +11,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from playwright.sync_api import sync_playwright
-from play.pages.login_page import LoginPage
-from play.pages.dashboard_page import DashboardPage
-from config import get_app_config, load_users
-from play.tests.test_utils import (
+from src.play.pages.login_page import LoginPage
+from src.play.pages.dashboard_page import DashboardPage
+from src.config import get_app_config, load_users
+from src.play.tests.test_utils import (
     test_element,
     test_button
 )

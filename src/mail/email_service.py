@@ -7,9 +7,9 @@ import base64
 import os
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from signoff_models import SignoffResult, SignoffUser
-from mail.config import get_email_config
-from storage import get_bucket_service
+from src.signoff_models import SignoffResult, SignoffUser
+from src.mail.config import get_email_config
+from src.storage import get_bucket_service
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ class EmailService:
             return None
         
         # Import here to avoid circular imports
-        from endpoints.main import generate_deletion_magic_link
+        from src.endpoints.main import generate_deletion_magic_link
         try:
             return generate_deletion_magic_link(email, db_session)
         except Exception as e:

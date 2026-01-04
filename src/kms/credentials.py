@@ -6,7 +6,7 @@ from typing import Optional, Tuple
 import logging
 from sqlalchemy.orm import Session
 
-from db.models import User, Credential
+from src.db.models import User, Credential
 from .service import KMSDecryptService
 
 logger = logging.getLogger(__name__)

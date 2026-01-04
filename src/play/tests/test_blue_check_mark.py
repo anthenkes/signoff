@@ -12,11 +12,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from playwright.sync_api import sync_playwright
-from play.pages.login_page import LoginPage
-from play.pages.dashboard_page import DashboardPage
-from play.pages.employee_page import EmployeePage
-from config import get_app_config, load_users
-from utils import setup_logging
+from src.play.pages.login_page import LoginPage
+from src.play.pages.dashboard_page import DashboardPage
+from src.play.pages.employee_page import EmployeePage
+from src.config import get_app_config, load_users
+from src.utils import setup_logging
 
 
 def test_blue_check_mark():

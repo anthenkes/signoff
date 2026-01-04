@@ -5,7 +5,7 @@ import os
 import json
 from pathlib import Path
 from typing import List, Optional, Dict, Any
-from signoff_models import SignoffUser
+from src.signoff_models import SignoffUser
 import logging
 
 # Try to load python-dotenv if available
@@ -128,7 +128,7 @@ def validate_config() -> bool:
             raise ValueError("No users configured")
         
         # Try to get email config (will raise if invalid)
-        from mail.config import get_email_config
+        from src.mail.config import get_email_config
         email_config = get_email_config()
         
         # Get app config (has defaults, should always work)
