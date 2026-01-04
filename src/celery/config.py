@@ -5,6 +5,7 @@ import os
 import logging
 from typing import Dict, Any
 from celery.schedules import crontab
+from datetime import timedelta
 
 # Try to load python-dotenv if available
 try:
@@ -100,6 +101,11 @@ def get_celery_config() -> Dict[str, Any]:
             'enqueue-signoffs-weekly-sun-0830': {
                 'task': 'src.celery.tasks.enqueue_all_signoffs_if_needed',
                 'schedule': crontab(minute=30, hour=8, day_of_week='sun'),
+            },
+            # TEST TASK: Remove this after verifying beat is working
+            'test-beat-working': {
+                'task': 'src.celery.tasks.test_beat_working',
+                'schedule': timedelta(minutes=5),  # Runs every 5 minutes for testing
             },
         },
     }

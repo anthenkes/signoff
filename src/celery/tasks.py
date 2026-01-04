@@ -291,6 +291,32 @@ def signoff_user_timecard(user_id: int):
         db.close()
 
 
+@celery_app.task(name="src.celery.tasks.test_beat_working")
+def test_beat_working():
+    """
+    Test task to verify Celery Beat is working properly.
+    This task runs every 5 minutes and logs a message.
+    REMOVE THIS TASK after verifying beat is working in production.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    
+    LA = ZoneInfo("America/Los_Angeles")
+    now = datetime.now(LA)
+    
+    logger.info("=" * 80)
+    logger.info("✓ CELERY BEAT IS WORKING! Test task executed successfully.")
+    logger.info(f"  Current time (LA): {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    logger.info(f"  Task: test_beat_working")
+    logger.info("=" * 80)
+    return {
+        "status": "success",
+        "message": "Celery Beat is working correctly",
+        "timestamp": now.isoformat(),
+        "timezone": "America/Los_Angeles"
+    }
+
+
 @celery_app.task(name="src.celery.tasks.enqueue_all_signoffs_if_needed")
 def enqueue_all_signoffs_if_needed():
     """
