@@ -341,7 +341,7 @@ async def create_magic_link(
                 if email_service:
                     email_service.send_admin_alert(
                         "Resend Package Not Available",
-                        f"Failed to send magic link email to {request.email} because Resend package is not installed.",
+                        f"Failed to send magic link email to {magic_link_request.email} because Resend package is not installed.",
                         "ImportError: Resend package not available"
                     )
             except:
@@ -349,13 +349,13 @@ async def create_magic_link(
         except Exception as e:
             # Don't fail the request if email fails, just log it
             error_traceback = traceback.format_exc()
-            logger.error(f"Failed to send magic link email to {request.email}: {e}", exc_info=True)
+            logger.error(f"Failed to send magic link email to {magic_link_request.email}: {e}", exc_info=True)
             # Send admin alert about email failure
             try:
                 if email_service:
                     email_service.send_admin_alert(
                         "Magic Link Email Send Failed",
-                        f"Failed to send magic link email to {request.email}. Magic link was created successfully: {link}",
+                        f"Failed to send magic link email to {magic_link_request.email}. Magic link was created successfully: {link}",
                         error_traceback
                     )
             except Exception as alert_error:
