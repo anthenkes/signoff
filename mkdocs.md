@@ -26,11 +26,6 @@ mkdocs-material
 
 
 ## Needs
-### In the repo
-1. `.python-version` file with just `3.12` inside of it
-    - This is so that cloudflare knows what python version to run when making the static pages
-2. `requirements-docs.txt` file - mkdocs, mkdocs-material
-    - Can add pugin packages later if enabled (ie mermaid)
 ### On Cloudflare
 In the cloudflare dashboard:
 ```
@@ -90,7 +85,9 @@ To automatically update docs site when production docs are deployed to `main` br
     In Cloudflare Dashboard → Workers & Pages → Pages → Create a project → Connect to Git
     ```
 2. Build settings (for /docs-site/)
-Use whatever your UI supports:
+Once you have selected the github repo:
+1. Name the project whatever you like (ie `workbench-pro-docs`)
+2. Unclick the **Builds for non-production
 If `Pages` has "Root Directory"
 - Root directory: `docs-site`
 - Build command:

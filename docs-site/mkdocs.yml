@@ -1,0 +1,100 @@
+site_name: Signoff Docs (Sandbox)
+site_description: Sandbox for testing Material for MkDocs
+site_author: Anthony
+# site_url: https://example.com/   # optional (only needed when publishing)
+
+repo_name: signoff
+repo_url: https://github.com/YOUR_ORG/YOUR_REPO
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - content.code.copy
+    - content.action.edit
+    - content.action.view
+    - search.highlight
+    - search.suggest
+    - toc.follow
+  palette:
+    - scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+nav:
+  - Home: index.md
+
+  - Getting Started:
+      - getting-started/local-dev.md
+      - getting-started/environment-vars.md
+      - getting-started/running-celery.md
+
+  - Architecture:
+      - architecture/overview.md
+      - architecture/repo-map.md
+      - Components:
+          - architecture/auth.md
+          - architecture/db.md
+          - architecture/celery.md
+          - architecture/kms.md
+          - architecture/mail.md
+
+  - Reference:
+      - reference/endpoints.md
+      - reference/config.md
+      - reference/cli.md
+
+  - Runbooks:
+      - runbooks/railway-deploy.md
+      - runbooks/troubleshooting.md
+      - runbooks/known-issues.md
+
+plugins:
+  - search
+  # Uncomment these after you install them (nice for a real repo)
+  # - tags
+  # - git-revision-date-localized:
+  #     enable_creation_date: true
+  # - git-authors
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - footnotes
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      check_paths: true
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+extra_javascript:
+  - assets/javascripts/extra.js
+
+# Optional: makes MkDocs rebuild when you change non-doc files
+watch:
+  - docs/
+#   - README.md
+#   - RAILWAY_SETUP.md
+#   - FLOW_ISSUES.md
