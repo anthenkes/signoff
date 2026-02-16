@@ -70,7 +70,8 @@ docs.workbenchpro.io
 
 #### Specific settings in the settings tab
 1. Click on **Branch control** -> set preview branch to None for now.
-2. Set **Build watch paths** to `docs-site/**` (exception if later decide to pull from outside docs-site folder)
+2. Set **Build watch paths** to `*`
+(**exception** if later decide to pull from outside docs-site folder need to change the Build config to the root folder and specify the watch paths ie docs-site/*)
 3. Scroll down to **General** and enable `Access Policy`
 - After access policy is enabled navigate to the **Manage** link and see info below
 
